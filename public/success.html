@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Tak for din ordre — BAHR & Co</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/velden.css?v=bahr4" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="logo logo--bahr"
+        ><img src="/images/bahr-logo.png" width="44" height="44" alt="" decoding="async" /><span
+          class="logo--bahr-text"
+          >BAHR & Co</span
+        ></a
+      >
+      <div class="nav-actions">
+        <a href="/shop.html" class="cart-link">Shop</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="section bg-white" style="min-height: 60vh; padding-top: 8rem">
+        <div class="container container--narrow text-center">
+          <h1 class="section-title">Tak for din ordre</h1>
+          <p id="status" class="prose" style="margin: 2rem auto; max-width: 28rem">
+            Bekræfter din ordre…
+          </p>
+          <p><a class="btn btn--ghost" href="/shop.html">Fortsæt med at shoppe</a></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer site-footer--minimal">
+      <p class="footer-bottom footer-bottom--minimal">BAHR & Co</p>
+    </footer>
+
+    <script src="/js/velden-cart.js"></script>
+    <script>
+      (function () {
+        var statusEl = document.getElementById("status");
+        var params = new URLSearchParams(window.location.search);
+        var sid = params.get("session_id");
+        if (!sid) {
+          statusEl.textContent =
+            "Vi kunne ikke bekræfte denne session. Hvis du har betalt, gem din Stripe-kvittering — vi honorerer den.";
+          return;
+        }
+        fetch("/api/checkout/complete?session_id=" + encodeURIComponent(sid))
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (j) {
+            if (j.pending) {
+              statusEl.textContent = "Betalingen behandles stadig. Opdater siden om et øjeblik.";
+              return;
+            }
+            if (j.ok && j.orderId) {
+              if (window.VeldenCart) VeldenCart.clearCart();
+              statusEl.textContent =
+                "Din ordre er bekræftet. Reference " +
+                j.orderId +
+                ". Du får en bekræftelse på e-mail. Vi går i gang med at forberede dine varer.";
+              return;
+            }
+            statusEl.textContent =
+              j.error ||
+              "Vi kunne ikke færdiggøre ordren. Hvis betalingen gik igennem, kontakt os med din kvittering.";
+          })
+          .catch(function () {
+            statusEl.textContent = "Netværksfejl. Tjek din e-mail for Stripe-bekræftelse.";
+          });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Shop — BAHR & Co</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/velden.css?v=bahr9" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="logo logo--bahr"
+        ><img src="/images/bahr-logo.png" width="44" height="44" alt="" decoding="async" /><span
+          class="logo--bahr-text"
+          >BAHR & Co</span
+        ></a
+      >
+      <button type="button" class="menu-toggle" data-menu-toggle aria-label="Åbn menu" aria-expanded="false">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+      <div class="nav-wrap">
+        <ul class="nav-main">
+          <li><a href="/shop.html" class="is-active">Shop</a></li>
+          <li><a href="/shop.html?category=shirts">Skjorter</a></li>
+          <li><a href="/shop.html?category=polos">Poloer</a></li>
+          <li><a href="/shop.html?category=knitwear">Strik</a></li>
+          <li><a href="/shop.html?category=trousers">Bukser</a></li>
+          <li><a href="/shop.html?category=outerwear">Outerwear</a></li>
+          <li><a href="/about.html">Om os</a></li>
+        </ul>
+      </div>
+      <div class="nav-actions">
+        <a
+          href="/admin"
+          class="cart-link"
+          style="opacity: 0.7; position: relative; z-index: 1001"
+          data-nav-dashboard
+          >Dashboard</a
+        >
+        <a
+          href="/cart.html"
+          class="cart-link"
+          data-nav-cart
+          style="position: relative; z-index: 1001"
+          >Kurv <span class="cart-count" data-cart-count data-empty="1"></span
+        ></a>
+      </div>
+    </header>
+
+    <main>
+      <section class="section bg-white">
+        <div class="container">
+          <h1 class="section-title" data-reveal style="margin-bottom: 0.5rem">Kollektionen</h1>
+          <p class="section-sub" data-reveal>Forfinede stykker, vist uden støj.</p>
+
+          <div class="filters" data-reveal>
+            <div>
+              <label for="f-cat">Kategori</label>
+              <select id="f-cat" aria-label="Filtrér efter kategori"></select>
+            </div>
+            <div>
+              <label for="f-size">Størrelse</label>
+              <select id="f-size" aria-label="Filtrér efter størrelse"></select>
+            </div>
+            <div>
+              <label for="f-color">Farve</label>
+              <select id="f-color" aria-label="Filtrér efter farve"></select>
+            </div>
+            <div>
+              <button type="button" class="btn btn--ghost" id="f-clear">Nulstil</button>
+            </div>
+          </div>
+
+          <div id="grid" class="product-grid">
+            <p class="message">Indlæser…</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer site-footer--minimal">
+      <p class="footer-bottom footer-bottom--minimal">
+        <a href="/">BAHR & Co</a> · <a href="/about.html">Om os</a>
+      </p>
+    </footer>
+
+    <script src="/js/velden-cart.js"></script>
+    <script src="/js/velden-ui.js?v=6"></script>
+    <script>
+      (function () {
+        var grid = document.getElementById("grid");
+        var fCat = document.getElementById("f-cat");
+        var fSize = document.getElementById("f-size");
+        var fColor = document.getElementById("f-color");
+
+        function fmt(n) {
+          return new Intl.NumberFormat("da-DK", {
+            style: "currency",
+            currency: "DKK",
+            maximumFractionDigits: 0,
+          }).format(n);
+        }
+
+        function esc(v) {
+          if (v == null) return "";
+          return String(v)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        function safeImageUrl(url) {
+          var raw = String(url || "").trim();
+          if (!raw) return "";
+          if (/^https?:\/\//i.test(raw) || raw.charAt(0) === "/") return raw;
+          return "";
+        }
+
+        function qs() {
+          var u = new URLSearchParams();
+          var c = fCat.value;
+          var s = fSize.value;
+          var col = fColor.value;
+          if (c && c !== "all") u.set("category", c);
+          if (s) u.set("size", s);
+          if (col) u.set("color", col);
+          return u.toString();
+        }
+
+        function render(products) {
+          if (!products.length) {
+            grid.innerHTML = '<p class="message">Intet matcher disse filtre.</p>';
+            return;
+          }
+          grid.innerHTML = "";
+          products.forEach(function (p) {
+            var q = qs();
+            var meta = p.categoryLabel || "";
+            if (p.colorOptionCount > 1) {
+              meta += (meta ? " · " : "") + (p.shopColorLabel || p.colorOptionCount + " farver");
+            } else if (p.color) {
+              meta += (meta ? " · " : "") + p.color;
+            }
+            var prices = (p.colorVariants || [])
+              .map(function (v) {
+                return Number(v.price);
+              })
+              .filter(function (n) {
+                return !isNaN(n) && n > 0;
+              });
+            var lo = prices.length ? Math.min.apply(null, prices) : Number(p.price);
+            var hi = prices.length ? Math.max.apply(null, prices) : Number(p.price);
+            var priceStr = lo < hi && prices.length > 1 ? "Fra " + fmt(lo) : fmt(p.price);
+            var a = document.createElement("a");
+            a.href = "/product.html?id=" + encodeURIComponent(p.id) + (q ? "&" + q : "");
+            a.className = "product-card";
+            a.innerHTML =
+              '<div class="product-card__img"><img src="' +
+              esc(safeImageUrl(p.image_url || "")) +
+              '" alt="" loading="lazy" width="600" height="800" /></div>' +
+              '<div class="product-card__meta">' +
+              esc(meta) +
+              "</div>" +
+              '<h2 class="product-card__name">' +
+              esc(p.name || "") +
+              "</h2>" +
+              '<div class="product-card__price">' +
+              esc(priceStr) +
+              "</div>";
+            grid.appendChild(a);
+          });
+        }
+
+        function load() {
+          grid.innerHTML = '<p class="message">Indlæser…</p>';
+          var q = qs();
+          fetch("/api/products" + (q ? "?" + q : ""))
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (data) {
+              if (!data.ok) {
+                grid.innerHTML = '<p class="message message--error">' + (data.error || "Fejl") + "</p>";
+                return;
+              }
+              render(data.products || []);
+            })
+            .catch(function () {
+              grid.innerHTML = '<p class="message message--error">Forbindelsesfejl.</p>';
+            });
+        }
+
+        function initFilters(categories, filtersData) {
+          var params = new URLSearchParams(window.location.search);
+          fCat.innerHTML = "";
+          (categories || []).forEach(function (c) {
+            var o = document.createElement("option");
+            o.value = c.id;
+            o.textContent = c.label + (c.count != null ? " (" + c.count + ")" : "");
+            fCat.appendChild(o);
+          });
+          var want = (params.get("category") || "all").toLowerCase();
+          if (![].slice.call(fCat.options).some(function (o) { return o.value === want; })) want = "all";
+          fCat.value = want;
+
+          function fillSelect(sel, items, placeholder, paramKey) {
+            var cur = params.get(paramKey) || "";
+            sel.innerHTML = '<option value="">' + placeholder + "</option>";
+            (items || []).forEach(function (x) {
+              var o = document.createElement("option");
+              o.value = x;
+              o.textContent = x;
+              sel.appendChild(o);
+            });
+            if (cur && [].slice.call(sel.options).some(function (o) { return o.value === cur; })) sel.value = cur;
+          }
+          fillSelect(fSize, filtersData.sizes, "Alle størrelser", "size");
+          fillSelect(fColor, filtersData.colors, "Alle farver", "color");
+
+          [fCat, fSize, fColor].forEach(function (el) {
+            el.addEventListener("change", function () {
+              var u = new URL(window.location.href);
+              u.search = qs() ? "?" + qs() : "";
+              window.history.replaceState({}, "", u);
+              load();
+            });
+          });
+          document.getElementById("f-clear").addEventListener("click", function () {
+            fCat.value = "all";
+            fSize.value = "";
+            fColor.value = "";
+            window.history.replaceState({}, "", "/shop.html");
+            load();
+          });
+        }
+
+        Promise.all([fetch("/api/categories").then(function (r) { return r.json(); }), fetch("/api/filters").then(function (r) { return r.json(); })])
+          .then(function (pair) {
+            var catRes = pair[0];
+            var filRes = pair[1];
+            initFilters(catRes.categories || [], filRes.ok ? filRes : { sizes: [], colors: [] });
+            load();
+          })
+          .catch(function () {
+            initFilters([{ id: "all", label: "All" }], { sizes: [], colors: [] });
+            load();
+          });
+      })();
+    </script>
+  </body>
+</html>

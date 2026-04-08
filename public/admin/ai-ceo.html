@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI CEO Control</title>
+    <style>
+      :root{--bg:#070a12;--txt:#eef3ff;--muted:#9fa9c7;--glass:rgba(255,255,255,.07);--line:rgba(255,255,255,.16);}
+      body{margin:0;font-family:Inter,system-ui,sans-serif;color:var(--txt);background:radial-gradient(1200px 600px at 100% -20%,#1d2b59 0,#070a12 50%),var(--bg);}
+      .wrap{max-width:1100px;margin:0 auto;padding:24px;}
+      .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+      .nav{display:flex;gap:8px;}
+      .nav a{color:#fff;text-decoration:none;border:1px solid var(--line);padding:7px 12px;border-radius:999px;background:var(--glass);}
+      .nav a.is-active{background:linear-gradient(135deg,#6d28d9,#0ea5e9);border-color:transparent;}
+      .card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.04));border-radius:16px;padding:16px;backdrop-filter:blur(10px);box-shadow:0 12px 30px rgba(0,0,0,.35);}
+      .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+      button{background:#8b5cf6;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+      .muted{color:var(--muted);}
+      pre{white-space:pre-wrap;font-size:12px;color:#dfe7ff;background:rgba(0,0,0,.25);padding:10px;border-radius:10px;max-height:360px;overflow:auto}
+      .timeline{max-height:280px;overflow:auto;display:grid;gap:8px;}
+      .evt{border:1px solid var(--line);border-radius:10px;padding:8px;background:rgba(0,0,0,.2);}
+      .evt .t{font-size:11px;color:var(--muted);}
+      @media (max-width:900px){.row{grid-template-columns:1fr}}
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="top">
+        <div>
+          <h1 style="margin:0;">AI CEO</h1>
+          <div class="muted">Run, inspect and compare optimization cycles.</div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/marketing">Marketing</a>
+          <a href="/admin/ai-ceo" class="is-active">AI CEO</a>
+          <a href="/admin.html">Classic</a>
+        </nav>
+      </div>
+      <div class="row">
+        <section class="card">
+          <h3 style="margin-top:0;">Manual Run</h3>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="mode">
+              <option value="light">Light</option>
+              <option value="full">Full</option>
+            </select>
+            <label><input id="dry" type="checkbox" /> Dry run</label>
+            <button id="run-btn">Run AI CEO</button>
+          </div>
+          <p class="muted" id="run-msg">Idle.</p>
+          <pre id="run-out">—</pre>
+        </section>
+        <section class="card">
+          <h3 style="margin-top:0;">Last Pretty Report</h3>
+          <pre id="pretty">Loading…</pre>
+          <h3>Recent Runs</h3>
+          <pre id="runs">Loading…</pre>
+        </section>
+      </div>
+      <section class="card" style="margin-top:14px;">
+        <h3 style="margin-top:0;">Live Timeline</h3>
+        <div class="muted">Auto-refresh every 10s from AI feed.</div>
+        <div id="timeline" class="timeline" style="margin-top:10px;"></div>
+      </section>
+    </main>
+    <script>
+      async function api(url, opts){const r=await fetch(url,Object.assign({credentials:"include"},opts||{}));const j=await r.json().catch(()=>null);if(!r.ok||!j||j.ok===false)throw new Error((j&&j.error)||"Request failed");return j;}
+      function renderTimeline(feed){
+        var box = document.getElementById("timeline");
+        if(!box) return;
+        var rows = (feed||[])
+          .filter(function(x){
+            var a = String((x&&x.action)||"");
+            return a.indexOf("ai_ceo.")===0 || a.indexOf("sourcing_")===0 || a.indexOf("product_added")===0;
+          })
+          .slice(0,30);
+        if(!rows.length){ box.innerHTML = '<div class="muted">No recent AI CEO events.</div>'; return; }
+        box.innerHTML = rows.map(function(r){
+          return '<div class="evt"><div><strong>'+String(r.action||"event")+'</strong></div><div class="t">'+new Date(r.created_at||Date.now()).toLocaleString("da-DK")+'</div><div class="t">'+String(r.message||"")+'</div></div>';
+        }).join("");
+      }
+      async function load(){
+        const [pretty, runs, feed] = await Promise.all([api("/api/admin/ai-ceo/last-run/pretty"), api("/api/admin/ai-ceo/runs"), api("/api/admin/ai-feed")]);
+        document.getElementById("pretty").textContent = JSON.stringify(pretty.report||null,null,2);
+        document.getElementById("runs").textContent = JSON.stringify(runs.runs||[],null,2);
+        renderTimeline(feed.feed||[]);
+      }
+      document.getElementById("run-btn").addEventListener("click", async function(){
+        const mode = document.getElementById("mode").value;
+        const dryRun = document.getElementById("dry").checked;
+        const msg = document.getElementById("run-msg");
+        msg.textContent = "Running…";
+        try{
+          const out = await api("/api/admin/run-ai-ceo",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode,dryRun})});
+          document.getElementById("run-out").textContent = JSON.stringify(out,null,2);
+          msg.textContent = "Completed.";
+          await load();
+        }catch(e){ msg.textContent = e.message; }
+      });
+      load().catch(function(e){ document.getElementById("pretty").textContent = e.message; document.getElementById("runs").textContent = e.message; });
+      setInterval(function(){ load().catch(function(){}); }, 10000);
+    </script>
+  </body>
+  </html>

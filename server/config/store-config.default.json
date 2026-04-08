@@ -1,0 +1,64 @@
+{
+  "brand": "Velden",
+  "tone": "quiet luxury, calm, confident",
+  "positioning": "timeless menswear",
+  "targetMargin": 0.55,
+  "priceRange": {
+    "min": 99,
+    "max": 6000
+  },
+  "allowedCategories": [
+    "shirts",
+    "polos",
+    "knitwear",
+    "trousers",
+    "outerwear",
+    "shoes",
+    "watches",
+    "accessories"
+  ],
+  "blockedKeywords": [
+    "women",
+    "kids",
+    "streetwear",
+    "bulk",
+    "wholesale",
+    "furniture"
+  ],
+  "strategy": {
+    "goal": "maximize_profit",
+    "risk": "balanced"
+  },
+  "maxCatalogProducts": 0,
+  "autoProductImport": true,
+  "enabledSources": [],
+  "sourcing": {
+    "defaultProvider": "web",
+    "merchandising": {
+      "focus": "balanced",
+      "seasonNote": "",
+      "vibeKeywords": ""
+    },
+    "providers": {
+      "web": {
+        "enabled": true,
+        "seedUrls": [],
+        "seedsByCategory": {}
+      },
+      "shopify": {
+        "enabled": false,
+        "storeUrl": "",
+        "accessToken": "",
+        "collectionHandle": "",
+        "adminShopHost": ""
+      },
+      "ebay": { "enabled": false },
+      "alibaba": { "enabled": false },
+      "cjdropshipping": { "enabled": false }
+    }
+  },
+  "integrations": {
+    "ebay": { "clientId": "", "clientSecret": "", "oauthToken": "", "devId": "" },
+    "alibaba": { "appKey": "", "appSecret": "", "accessToken": "" }
+  }
+}

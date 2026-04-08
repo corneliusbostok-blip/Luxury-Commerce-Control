@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Checkout — BAHR & Co</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/velden.css?v=bahr4" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="logo logo--bahr"
+        ><img src="/images/bahr-logo.png" width="44" height="44" alt="" decoding="async" /><span
+          class="logo--bahr-text"
+          >BAHR & Co</span
+        ></a
+      >
+      <button type="button" class="menu-toggle" data-menu-toggle aria-label="Åbn menu" aria-expanded="false">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+      <div class="nav-wrap">
+        <ul class="nav-main">
+          <li><a href="/shop.html">Shop</a></li>
+          <li><a href="/about.html">Om os</a></li>
+        </ul>
+      </div>
+      <div class="nav-actions">
+        <a href="/cart.html" class="cart-link"
+          >Kurv <span class="cart-count" data-cart-count data-empty="1"></span
+        ></a>
+      </div>
+    </header>
+
+    <main>
+      <div class="checkout-layout">
+        <div id="checkout-root"></div>
+      </div>
+    </main>
+
+    <footer class="site-footer site-footer--minimal">
+      <p class="footer-bottom footer-bottom--minimal"><a href="/shop.html">Fortsæt med at shoppe</a></p>
+    </footer>
+
+    <script src="/js/common/api-client.js"></script>
+    <script src="/js/velden-cart.js"></script>
+    <script src="/js/velden-checkout.js?v=5"></script>
+    <script src="/js/velden-ui.js"></script>
+  </body>
+</html>

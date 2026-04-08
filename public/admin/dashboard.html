@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin Dashboard · Luxury Control</title>
+    <style>
+      :root { --bg:#090b12; --glass:rgba(255,255,255,.08); --line:rgba(255,255,255,.14); --txt:#eef2ff; --muted:#aab4d3; --acc:#8b5cf6; --acc2:#22d3ee; }
+      * { box-sizing:border-box; }
+      body { margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--txt); background:radial-gradient(1000px 500px at 10% -20%,#2a184d 0,#090b12 48%),radial-gradient(900px 450px at 110% 0,#073046 0,#090b12 45%),var(--bg); }
+      .wrap { max-width:1200px; margin:0 auto; padding:24px; }
+      .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+      .nav { display:flex; gap:10px; }
+      .nav a { text-decoration:none; color:var(--txt); border:1px solid var(--line); background:var(--glass); padding:8px 12px; border-radius:999px; backdrop-filter: blur(8px); transition:.2s transform,.2s border-color; }
+      .nav a:hover { transform:translateY(-2px); border-color:#fff; }
+      .nav a.is-active { background: linear-gradient(135deg,#6d28d9,#0ea5e9); border-color: transparent; color:#fff; }
+      .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
+      .card { border:1px solid var(--line); background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.04)); border-radius:16px; padding:16px; backdrop-filter: blur(12px); box-shadow:0 12px 32px rgba(0,0,0,.35); transition:transform .25s ease, box-shadow .25s ease; transform-style:preserve-3d; }
+      .card:hover { transform:translateY(-4px) rotateX(2deg); box-shadow:0 20px 40px rgba(0,0,0,.45); }
+      .k { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+      .v { font-size:28px; font-weight:700; margin-top:6px; }
+      .panel { margin-top:14px; border:1px solid var(--line); background:var(--glass); border-radius:16px; padding:16px; backdrop-filter: blur(12px); }
+      .row { display:grid; grid-template-columns:1.3fr 1fr; gap:14px; }
+      .small { color:var(--muted); font-size:13px; }
+      .pulse { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:8px; background:#22c55e; box-shadow:0 0 16px #22c55e; }
+      @media (max-width: 980px) { .grid { grid-template-columns:1fr 1fr; } .row { grid-template-columns:1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="top">
+        <div>
+          <h1 style="margin:0;">Luxury Control Dashboard</h1>
+          <div class="small"><span class="pulse"></span>AI CEO + Sourcing + Marketing live</div>
+        </div>
+        <nav class="nav">
+          <a href="/admin/dashboard" class="is-active">Dashboard</a>
+          <a href="/admin/marketing">Marketing</a>
+          <a href="/admin/ai-ceo">AI CEO</a>
+          <a href="/admin.html">Classic</a>
+        </nav>
+      </div>
+
+      <section class="grid" id="kpis">
+        <article class="card"><div class="k">Products</div><div class="v" id="k-products">—</div></article>
+        <article class="card"><div class="k">Drafts</div><div class="v" id="k-drafts">—</div></article>
+        <article class="card"><div class="k">Removed</div><div class="v" id="k-removed">—</div></article>
+        <article class="card"><div class="k">AI Running</div><div class="v" id="k-ai">—</div></article>
+      </section>
+
+      <section class="row">
+        <article class="panel">
+          <h3 style="margin-top:0">AI Status</h3>
+          <div class="small" id="ai-status">Loading…</div>
+        </article>
+        <article class="panel">
+          <h3 style="margin-top:0">Sourcing Health</h3>
+          <div class="small" id="sourcing-health">Loading…</div>
+        </article>
+      </section>
+    </main>
+    <script>
+      async function get(url){const r=await fetch(url,{credentials:"include"}); const j=await r.json(); if(!r.ok||!j) throw new Error((j&&j.error)||"Failed"); return j;}
+      (async function(){
+        try{
+          const [summary, health] = await Promise.all([get("/api/admin/summary"), get("/api/admin/sourcing-health")]);
+          const p = summary.products||{};
+          document.getElementById("k-products").textContent = Number(p.active||0);
+          document.getElementById("k-drafts").textContent = Number(p.drafts||0);
+          document.getElementById("k-removed").textContent = Number(p.removed||0);
+          document.getElementById("k-ai").textContent = summary.ai && summary.ai.running ? "YES" : "NO";
+          document.getElementById("ai-status").textContent = JSON.stringify(summary.ai||{}, null, 2);
+          document.getElementById("sourcing-health").textContent = JSON.stringify(health||{}, null, 2);
+        }catch(e){
+          document.getElementById("ai-status").textContent = e.message;
+          document.getElementById("sourcing-health").textContent = e.message;
+        }
+      })();
+    </script>
+  </body>
+  </html>

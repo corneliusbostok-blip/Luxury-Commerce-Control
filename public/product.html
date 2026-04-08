@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Produkt — BAHR & Co</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/velden.css?v=bahr5" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="logo logo--bahr"
+        ><img src="/images/bahr-logo.png" width="44" height="44" alt="" decoding="async" /><span
+          class="logo--bahr-text"
+          >BAHR & Co</span
+        ></a
+      >
+      <button type="button" class="menu-toggle" data-menu-toggle aria-label="Åbn menu" aria-expanded="false">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+      <div class="nav-wrap">
+        <ul class="nav-main">
+          <li><a href="/shop.html">Shop</a></li>
+          <li><a href="/shop.html?category=shirts">Skjorter</a></li>
+          <li><a href="/shop.html?category=polos">Poloer</a></li>
+          <li><a href="/shop.html?category=knitwear">Strik</a></li>
+          <li><a href="/shop.html?category=trousers">Bukser</a></li>
+          <li><a href="/shop.html?category=outerwear">Outerwear</a></li>
+          <li><a href="/about.html">Om os</a></li>
+        </ul>
+      </div>
+      <div class="nav-actions">
+        <a href="/cart.html" class="cart-link"
+          >Kurv <span class="cart-count" data-cart-count data-empty="1"></span
+        ></a>
+      </div>
+    </header>
+
+    <main>
+      <div id="root">
+        <p class="message" style="padding-top: 6rem">Indlæser…</p>
+      </div>
+    </main>
+
+    <footer class="site-footer site-footer--minimal">
+      <p class="footer-bottom footer-bottom--minimal">
+        <a href="/shop.html">Tilbage til shop</a>
+      </p>
+    </footer>
+
+    <script src="/js/velden-cart.js"></script>
+    <script src="/js/velden-ui.js"></script>
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var id = params.get("id");
+        var backQs = params.toString().replace(/^id=[^&]+&?/, "").replace(/&?id=[^&]+/, "");
+        var root = document.getElementById("root");
+
+        function fmt(n) {
+          return new Intl.NumberFormat("da-DK", {
+            style: "currency",
+            currency: "DKK",
+            maximumFractionDigits: 0,
+          }).format(n);
+        }
+
+        function esc(s) {
+          return String(s || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        }
+
+        function normSize(s) {
+          return String(s || "")
+            .trim()
+            .toUpperCase()
+            .replace(/\s+/g, "");
+        }
+        function normColor(c) {
+          return String(c || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+        }
+
+        if (!id) {
+          root.innerHTML = '<p class="message message--error">Produktet findes ikke.</p>';
+          return;
+        }
+
+        fetch("/api/product/" + encodeURIComponent(id))
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (data) {
+            if (!data.ok || !data.product) {
+              root.innerHTML = '<p class="message">Dette produkt er ikke længere tilgængeligt.</p>';
+              return;
+            }
+            var p = data.product;
+            var metaTitle = (p.seo_meta_title || p.name || "Produkt").trim();
+            var plainDesc = String(p.description || "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            var metaDesc = (p.seo_meta_description || "").trim() || plainDesc.slice(0, 160);
+            document.title = metaTitle + " — BAHR & Co";
+            var md0 = document.querySelector('meta[name="description"]');
+            if (!md0) {
+              md0 = document.createElement("meta");
+              md0.setAttribute("name", "description");
+              document.head.appendChild(md0);
+            }
+            md0.setAttribute("content", metaDesc);
+            fetch("/api/track/view", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ productId: p.id }),
+            }).catch(function () {});
+
+            var colorVariants =
+              p.colorVariants && p.colorVariants.length
+                ? p.colorVariants
+                : [
+                    {
+                      color: p.color || "",
+                      price: p.price,
+                      image_url: p.image_url || "",
+                    },
+                  ];
+            var selectedVi = 0;
+
+            var galleryUrls = [];
+            var seenU = {};
+            (Array.isArray(p.images) ? p.images : []).forEach(function (u) {
+              var x = String(u || "").trim();
+              if (x && !seenU[x]) {
+                seenU[x] = 1;
+                galleryUrls.push(x);
+              }
+            });
+            if (!galleryUrls.length) {
+              var primary = (colorVariants[0] && colorVariants[0].image_url) || p.image_url || "";
+              if (primary) galleryUrls.push(primary);
+            }
+
+            var sizes = p.sizeOptions && p.sizeOptions.length ? p.sizeOptions : ["One size"];
+            var selectedSize = sizes[0];
+            var supplierVariants = Array.isArray(p.variants) ? p.variants : [];
+
+            (function mergeSupplierColorsIntoVariants() {
+              if (colorVariants.length > 1) return;
+              var seen = {};
+              var cols = [];
+              supplierVariants.forEach(function (v) {
+                var c = String(v && v.color ? v.color : "").trim();
+                if (!c) return;
+                var k = normColor(c);
+                if (seen[k]) return;
+                seen[k] = 1;
+                cols.push(c);
+              });
+              if (cols.length <= 1) return;
+              var primaryCol = String((colorVariants[0] && colorVariants[0].color) || p.color || "").trim();
+              if (primaryCol && !cols.some(function (c) { return normColor(c) === normColor(primaryCol); })) {
+                cols.unshift(primaryCol);
+              }
+              function priceForColor(col) {
+                var rows = supplierVariants.filter(function (v) {
+                  return normColor(v && v.color) === normColor(col);
+                });
+                var prices = rows
+                  .map(function (v) {
+                    return Number(v.price);
+                  })
+                  .filter(function (n) {
+                    return n > 0;
+                  });
+                if (prices.length) return Math.min.apply(null, prices);
+                return Number(p.price) || 0;
+              }
+              var baseImg =
+                (colorVariants[0] && colorVariants[0].image_url) || p.image_url || "";
+              colorVariants = cols.map(function (col) {
+                return {
+                  color: col,
+                  price: priceForColor(col),
+                  image_url: baseImg,
+                };
+              });
+            })();
+
+            var points = (p.selling_points || "").split("|").map(function (s) { return s.trim(); }).filter(Boolean);
+            var descriptionSafe = esc(
+              String(p.description || "")
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+            );
+
+            var shopBack = "/shop.html" + (backQs ? "?" + backQs : "");
+            var crumb = '<div class="pd__crumb"><a href="' + shopBack + '">Shop</a>';
+            if (p.categoryLabel) crumb += " · " + esc(p.categoryLabel);
+            crumb += "</div>";
+
+            var sizeHtml = sizes
+              .map(function (s, i) {
+                return (
+                  '<button type="button" class="' +
+                  (i === 0 ? "is-selected " : "") +
+                  'size-opt" data-size="' +
+                  esc(s) +
+                  '">' +
+                  esc(s) +
+                  "</button>"
+                );
+              })
+              .join("");
+
+            var colorHtml = "";
+            if (colorVariants.length > 1) {
+              colorHtml =
+                '<p class="field-label">Farve</p><div class="size-picker" id="colors">' +
+                colorVariants
+                  .map(function (v, i) {
+                    return (
+                      '<button type="button" class="' +
+                      (i === 0 ? "is-selected " : "") +
+                      'size-opt color-opt" data-vi="' +
+                      i +
+                      '">' +
+                      esc(v.color || "—") +
+                      "</button>"
+                    );
+                  })
+                  .join("") +
+                "</div>";
+            } else if (colorVariants[0] && colorVariants[0].color) {
+              colorHtml =
+                '<p class="field-label">Farve</p><p style="margin:0 0 1.5rem;color:var(--text-soft)">' +
+                esc(colorVariants[0].color) +
+                "</p>";
+            }
+
+            function effectiveVariantColor() {
+              var v = colorVariants[selectedVi];
+              return (v && v.color) || p.color || "";
+            }
+
+            function isSizeAvailable(size) {
+              var col = normColor(effectiveVariantColor());
+              var sz = normSize(size);
+              var rows = supplierVariants.filter(function (v) {
+                if (!v) return false;
+                if (normSize(v.size) !== sz) return false;
+                var vc = normColor(v.color);
+                if (!vc || col === "") return true;
+                return vc === col;
+              });
+              if (!rows.length) return p.available !== false;
+              return rows.some(function (r) {
+                return r && r.available !== false;
+              });
+            }
+
+            function productLevelInStock() {
+              return p.available !== false;
+            }
+
+            function stockBlockHtml() {
+              var ok = productLevelInStock();
+              var reason = String(p.availability_reason || "").trim();
+              if (!ok) {
+                return (
+                  '<div class="pd-stock pd-stock--bad" id="pd-stock" role="status">' +
+                  esc(reason || "Ikke på lager lige nu.") +
+                  "</div>"
+                );
+              }
+              var hint = "På lager — kan lægges i kurven.";
+              if (reason && /lager|stock|ship|lev/i.test(reason)) hint = reason;
+              return '<div class="pd-stock pd-stock--ok" id="pd-stock" role="status">' + esc(hint) + "</div>";
+            }
+
+            var thumbsHtml = "";
+            if (galleryUrls.length > 1) {
+              thumbsHtml =
+                '<div class="pd__thumbs" id="pd-thumbs" aria-label="Produktbilleder">' +
+                galleryUrls
+                  .map(function (u, i) {
+                    return (
+                      '<button type="button" class="pd__thumb' +
+                      (i === 0 ? " is-active" : "") +
+                      '" data-gi="' +
+                      i +
+                      '" aria-label="Billede ' +
+                      (i + 1) +
+                      ' af ' +
+                      galleryUrls.length +
+                      '"><img src="' +
+                      esc(u) +
+                      '" alt="" loading="lazy" decoding="async" /></button>'
+                    );
+                  })
+                  .join("") +
+                "</div>";
+            }
+
+            var v0 = colorVariants[0] || {};
+            var mainSrc = v0.image_url || p.image_url || galleryUrls[0] || "";
+
+            var ul =
+              points.length > 0
+                ? "<ul class='detail-points'>" +
+                  points.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") +
+                  "</ul>"
+                : "";
+
+            root.innerHTML =
+              '<article class="pd">' +
+              '<div class="pd__gallery">' +
+              '<div class="pd__gallery-main">' +
+              '<img id="pd-img" src="' +
+              esc(mainSrc) +
+              '" alt="' +
+              String(p.name || "Produkt").replace(/"/g, "&quot;") +
+              '" /></div>' +
+              thumbsHtml +
+              "</div>" +
+              '<div>' +
+              crumb +
+              '<h1 class="pd__title">' +
+              esc(p.name || "") +
+              "</h1>" +
+              '<p class="pd__price" id="pd-price">' +
+              fmt(Number(v0.price != null ? v0.price : p.price)) +
+              "</p>" +
+              stockBlockHtml() +
+              '<div class="pd__desc">' +
+              descriptionSafe +
+              "</div>" +
+              colorHtml +
+              '<p class="field-label">Størrelse</p><div class="size-picker" id="sizes">' +
+              sizeHtml +
+              "</div>" +
+              '<button type="button" class="btn btn--primary btn--block" id="add-cart">Læg i kurven</button>' +
+              '<p style="font-size:0.8rem;color:var(--text-soft);margin-top:1rem">Returret inden for 14 dage. Fragt beregnes ved betaling efter valgt land.</p>' +
+              '<div class="pd__trust">' +
+              "<div><strong>Materialer</strong> — Beskrevet ærligt. Vi foretrækker naturlige fibre og holdbare vævninger.</div>" +
+              "<div><strong>Passform</strong> — Normal i størrelsen medmindre andet er angivet.</div>" +
+              "<div><strong>Pleje</strong> — Hvert stykke sendes med enkle plejeråd.</div>" +
+              "</div>" +
+              ul +
+              "</div></article>";
+
+            var selectedGalleryIdx = 0;
+
+            function setActiveThumb(idx) {
+              selectedGalleryIdx = Math.max(0, Math.min(galleryUrls.length - 1, idx));
+              var thumbs = root.querySelectorAll(".pd__thumb");
+              thumbs.forEach(function (t, j) {
+                t.classList.toggle("is-active", j === selectedGalleryIdx);
+              });
+            }
+
+            function applyVariant(i) {
+              selectedVi = Math.max(0, Math.min(colorVariants.length - 1, i));
+              var v = colorVariants[selectedVi];
+              var img = document.getElementById("pd-img");
+              var pr = document.getElementById("pd-price");
+              var cand = (v && v.image_url) || p.image_url || "";
+              var gi = cand ? galleryUrls.indexOf(cand) : -1;
+              if (gi >= 0) {
+                selectedGalleryIdx = gi;
+                setActiveThumb(gi);
+                if (img) img.src = galleryUrls[gi];
+              } else if (cand && img) {
+                img.src = cand;
+              } else if (img && galleryUrls.length) {
+                img.src = galleryUrls[selectedGalleryIdx] || galleryUrls[0];
+              }
+              if (pr) pr.textContent = fmt(Number(v.price != null ? v.price : p.price));
+              refreshSizeUi();
+            }
+
+            function refreshSizeUi() {
+              var sizeBtns = root.querySelectorAll("#sizes .size-opt");
+              sizeBtns.forEach(function (btn) {
+                var sz = btn.getAttribute("data-size");
+                var avail = isSizeAvailable(sz);
+                btn.classList.toggle("is-unavailable", !avail);
+                btn.title = avail ? "" : "Ikke på lager i denne størrelse";
+              });
+              if (!isSizeAvailable(selectedSize)) {
+                for (var i = 0; i < sizes.length; i++) {
+                  if (isSizeAvailable(sizes[i])) {
+                    selectedSize = sizes[i];
+                    sizeBtns.forEach(function (b) {
+                      b.classList.toggle("is-selected", b.getAttribute("data-size") === selectedSize);
+                    });
+                    break;
+                  }
+                }
+              }
+              var addBtn = document.getElementById("add-cart");
+              var stockEl = document.getElementById("pd-stock");
+              var canBuy = productLevelInStock() && isSizeAvailable(selectedSize);
+              if (addBtn) addBtn.disabled = !canBuy;
+              if (stockEl && productLevelInStock()) {
+                if (!isSizeAvailable(selectedSize)) {
+                  stockEl.className = "pd-stock pd-stock--bad";
+                  stockEl.textContent = "Den valgte størrelse er ikke tilgængelig.";
+                } else {
+                  stockEl.className = "pd-stock pd-stock--ok";
+                  stockEl.textContent = "På lager — kan lægges i kurven.";
+                }
+              }
+            }
+
+            root.querySelectorAll(".pd__thumb").forEach(function (btn) {
+              btn.addEventListener("click", function () {
+                var idx = parseInt(btn.getAttribute("data-gi"), 10) || 0;
+                setActiveThumb(idx);
+                var img = document.getElementById("pd-img");
+                if (img && galleryUrls[idx]) img.src = galleryUrls[idx];
+              });
+            });
+
+            var colorBtns = root.querySelectorAll(".color-opt");
+            colorBtns.forEach(function (btn) {
+              btn.addEventListener("click", function () {
+                colorBtns.forEach(function (b) { b.classList.remove("is-selected"); });
+                btn.classList.add("is-selected");
+                applyVariant(parseInt(btn.getAttribute("data-vi"), 10) || 0);
+              });
+            });
+
+            var sizeBtns = root.querySelectorAll("#sizes .size-opt");
+            sizeBtns.forEach(function (btn) {
+              btn.addEventListener("click", function () {
+                if (btn.classList.contains("is-unavailable")) return;
+                sizeBtns.forEach(function (b) { b.classList.remove("is-selected"); });
+                btn.classList.add("is-selected");
+                selectedSize = btn.getAttribute("data-size");
+                refreshSizeUi();
+              });
+            });
+
+            refreshSizeUi();
+
+            document.getElementById("add-cart").addEventListener("click", function () {
+              var btn = document.getElementById("add-cart");
+              if (!productLevelInStock() || !isSizeAvailable(selectedSize)) return;
+              btn.disabled = true;
+              fetch("/api/track/click", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ productId: p.id }),
+              }).catch(function () {});
+              var v = colorVariants[selectedVi] || {};
+              var lineImg = document.getElementById("pd-img");
+              VeldenCart.addToCart({
+                productId: p.id,
+                name: p.name,
+                image: (lineImg && lineImg.src) || v.image_url || p.image_url,
+                price: Number(v.price != null ? v.price : p.price),
+                size: selectedSize,
+                color: v.color || p.color || "",
+                categoryLabel: p.categoryLabel || "",
+                quantity: 1,
+              });
+              btn.textContent = "Tilføjet";
+              setTimeout(function () {
+                btn.textContent = "Læg i kurven";
+                refreshSizeUi();
+              }, 1600);
+            });
+
+            if (window.dispatchEvent) window.dispatchEvent(new CustomEvent("velden-cart"));
+          })
+          .catch(function () {
+            root.innerHTML = '<p class="message message--error">Kunne ikke indlæse produktet.</p>';
+          });
+      })();
+    </script>
+  </body>
+</html>

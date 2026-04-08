@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Om BAHR & Co</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/velden.css?v=bahr4" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="logo logo--bahr"
+        ><img src="/images/bahr-logo.png" width="44" height="44" alt="" decoding="async" /><span
+          class="logo--bahr-text"
+          >BAHR & Co</span
+        ></a
+      >
+      <button type="button" class="menu-toggle" data-menu-toggle aria-label="Åbn menu" aria-expanded="false">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+      <div class="nav-wrap">
+        <ul class="nav-main">
+          <li><a href="/shop.html">Shop</a></li>
+          <li><a href="/shop.html?category=shirts">Skjorter</a></li>
+          <li><a href="/shop.html?category=polos">Poloer</a></li>
+          <li><a href="/shop.html?category=knitwear">Strik</a></li>
+          <li><a href="/shop.html?category=trousers">Bukser</a></li>
+          <li><a href="/shop.html?category=outerwear">Outerwear</a></li>
+          <li><a href="/about.html" class="is-active">Om os</a></li>
+        </ul>
+      </div>
+      <div class="nav-actions">
+        <a href="/cart.html" class="cart-link"
+          >Kurv <span class="cart-count" data-cart-count data-empty="1"></span
+        ></a>
+      </div>
+    </header>
+
+    <main>
+      <section class="section bg-white" style="padding-top: 5rem">
+        <div class="container container--narrow prose" data-reveal>
+            <h1 class="section-title" style="text-align: left; margin-bottom: 1.5rem">Huset BAHR & Co</h1>
+          <p>
+            BAHR & Co bygger på én overbevisning: at klæde sig godt på er en form for høflighed — over for sig selv og over
+            for det rum, man træder ind i. Vi er ikke interesserede i nyhed for nyhedens skyld, eller i logoer der taler
+            før du gør.
+          </p>
+          <p>
+            Vores referencer er de varige huse inden for europæisk og amerikansk skræddersøm, hvor stof vælges for hvordan
+            det ældes, og snit vurderes på hvor roligt det falder over skulder og ben.
+          </p>
+        </div>
+      </section>
+
+      <section class="section section--about-visual">
+        <div class="container story-split story-split--brand">
+          <div class="prose" data-reveal>
+            <h2 class="section-title" style="text-align: left; margin-bottom: 1rem">Håndværk</h2>
+            <p>
+              Vi samarbejder med værksteder der stadig tænker i sæsoner målt i år. Håndafsluttede kanter, canvasserede
+              frakker dér hvor det betyder noget, og strik der holder formen gennem vintre med brug — det er ikke detaljer
+              vi råber højt om; det er bare det minimum vi accepterer.
+            </p>
+            <p>
+              Når vi introducerer en ny kategori, er det fordi vi har fundet en kilde der møder den standard — ikke fordi et
+              trenddiagram foreslog det.
+            </p>
+          </div>
+          <figure class="about-brand-frame" data-reveal>
+            <img
+              src="/images/bahr-brand-identity.png"
+              alt="BAHR &amp; Co — visitkort med guldmonogram og vævet label på sort stof; Curated fashion &amp; lifestyle"
+              width="900"
+              height="1200"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption class="about-brand-caption">Curated fashion &amp; lifestyle</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section bg-white">
+        <div class="container container--narrow prose" data-reveal>
+          <h2 class="section-title" style="text-align: left; margin-bottom: 1rem">Tidløs mode</h2>
+          <p>
+            En BAHR &amp; Co-garderobe skal kunne vokse. Frakken du køber i dag skal kunne bære tørklædet du tilføjer næste år.
+            Skjorten skal sidde roligt under den striktrøje du allerede har. Farverne holder sig i en disciplineret
+            palet — navy, sten, camel, kridt — så stykkerne spiller sammen uden stylist.
+          </p>
+          <p>
+            Vi betjener mænd der bygger et liv, ikke ét outfit. Hvis det er dit tempo, er du allerede hjemme her.
+          </p>
+          <p style="margin-top: 2rem">
+            <a class="btn btn--ghost" href="/shop.html">Se kollektionen</a>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer site-footer--minimal">
+      <p class="footer-bottom footer-bottom--minimal"><a href="/">BAHR & Co</a></p>
+    </footer>
+
+    <script src="/js/velden-cart.js"></script>
+    <script src="/js/velden-ui.js"></script>
+  </body>
+</html>

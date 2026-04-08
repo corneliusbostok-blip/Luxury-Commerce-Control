@@ -1,0 +1,28 @@
+{
+  "name": "timeflow-ai",
+  "version": "1.0.0",
+  "description": "Velden — quiet luxury men's fashion storefront + automation",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node -r ./server/set-local-dev.js server/index.js",
+    "verify:shopify": "node scripts/verify-shopify-sourcing.js",
+    "sync:taxonomy": "node scripts/sync-store-taxonomy.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "bullmq": "^5.73.1",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.3.2",
+    "ioredis": "^5.10.1",
+    "serverless-http": "^3.2.0",
+    "stripe": "^16.12.0",
+    "zod": "^4.3.6"
+  }
+}

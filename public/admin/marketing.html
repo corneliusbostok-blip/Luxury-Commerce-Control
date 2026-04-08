@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Marketing Control</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #eef2ff; background: radial-gradient(1100px 600px at -5% -20%, #2e1b56 0, #090b12 45%), radial-gradient(900px 450px at 110% 0, #04354a 0, #090b12 45%); }
+      .wrap { max-width: 1100px; margin: 2rem auto; padding: 0 1rem 2rem; }
+      .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+      .title { margin: 0; font-size: 1.5rem; }
+      .sub { color: #a7b0ca; margin-top: 0.3rem; }
+      .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+      .card, .panel { border: 1px solid rgba(255,255,255,.15); border-radius: 14px; padding: 1rem; background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.05)); box-shadow: 0 14px 34px rgba(0,0,0,.35); backdrop-filter: blur(12px); transition: transform .2s ease, box-shadow .2s ease; }
+      .card:hover, .panel:hover { transform: translateY(-3px); box-shadow: 0 20px 40px rgba(0,0,0,.45); }
+      .status { font-size: .9rem; font-weight: 600; }
+      .ok { color: #14803c; }
+      .bad { color: #b42318; }
+      .row { display: flex; gap: .5rem; margin-top: .75rem; flex-wrap: wrap; }
+      button, select { border: 1px solid rgba(255,255,255,.2); color: #eaf0ff; background: rgba(14,18,31,.75); border-radius: 8px; padding: .55rem .75rem; cursor: pointer; }
+      button.primary { background: linear-gradient(135deg, #6d28d9, #0ea5e9); color: #fff; border-color: transparent; }
+      .section { margin-top: 1rem; }
+      .settings { display: grid; gap: .6rem; }
+      .preview { display: grid; grid-template-columns: 220px 1fr; gap: 1rem; }
+      .preview img { width: 100%; border-radius: 10px; background: rgba(255,255,255,.06); min-height: 180px; object-fit: cover; }
+      .list { display: grid; gap: .6rem; }
+      .post { border: 1px solid rgba(255,255,255,.16); border-radius: 10px; padding: .7rem; background: rgba(11,15,27,.7); }
+      .meta { color: #aeb8d3; font-size: .85rem; }
+      a { color: #dbe8ff; }
+      .nav-shell { display:flex; gap:.5rem; }
+      .nav-shell a { text-decoration:none; padding:.45rem .7rem; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(17,23,37,.65); }
+      .nav-shell a.is-active { background: linear-gradient(135deg, #6d28d9, #0ea5e9); border-color: transparent; color: #fff; }
+      .notice { margin-top:.75rem; font-size:.9rem; color:#b9c7ec; min-height:1.2em; }
+      .notice.ok { color:#4ade80; }
+      .notice.err { color:#fda4af; }
+      #mk-auth-banner { display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 10px; border: 1px solid rgba(253,164,175,.45); background: rgba(180,35,24,.25); color: #ffe4e6; font-size: 0.92rem; }
+      @media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } .preview { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div id="mk-auth-banner" role="alert"></div>
+      <div class="top">
+        <div>
+          <h1 class="title">AI Marketing</h1>
+          <p class="sub">Connect platforms, control auto marketing, and preview posts before go-live.</p>
+        </div>
+        <div class="nav-shell">
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/ai-ceo">AI CEO</a>
+          <a href="/admin/marketing" class="is-active">Marketing</a>
+          <a href="/admin.html">Classic</a>
+        </div>
+      </div>
+
+      <section class="section">
+        <h2>1) Platform Connect</h2>
+        <div id="platform-grid" class="grid3"></div>
+      </section>
+
+      <section class="section panel">
+        <h2>2) Auto Marketing Settings</h2>
+        <div class="settings">
+          <label><input type="checkbox" id="mk-enabled" /> Enable AI Marketing</label>
+          <label><input type="checkbox" id="mk-new-product" /> Post on new product</label>
+          <label><input type="checkbox" id="mk-price-drop" /> Post on price drop</label>
+          <label><input type="checkbox" id="mk-trending" /> Post on trending product</label>
+          <label>Max posts per day: <span id="mk-max-label">3</span></label>
+          <input id="mk-max-posts" type="range" min="1" max="20" value="3" />
+          <div class="row">
+            <button id="save-settings" class="primary">Save settings</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section panel">
+        <h2>3) Preview / Test</h2>
+        <div class="row">
+          <label for="manual-product">Product for manual post:</label>
+          <select id="manual-product">
+            <option value="">Auto (best product)</option>
+          </select>
+        </div>
+        <div class="row">
+          <select id="test-platform">
+            <option value="facebook">Facebook</option>
+            <option value="instagram">Instagram</option>
+            <option value="tiktok">TikTok</option>
+          </select>
+          <button id="generate-test" class="primary">Generate Test Post</button>
+        </div>
+        <div class="preview" style="margin-top: 1rem">
+          <img id="preview-image" alt="Preview image" />
+          <div>
+            <div id="preview-caption">No preview yet.</div>
+            <div id="preview-tags" class="meta" style="margin-top: .6rem"></div>
+            <div style="margin-top:.35rem;"><a id="preview-link" href="#" target="_blank" rel="noopener">Open product page</a></div>
+            <div id="mk-notice" class="notice"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section panel">
+        <h2>4) Recent Posts</h2>
+        <div id="posts-list" class="list"></div>
+      </section>
+    </main>
+    <script>
+      (function () {
+        try {
+          var u = new URL(window.location.href);
+          var embedded = u.searchParams.get("embedded") === "1" || window.self !== window.top;
+          if (embedded) {
+            var top = document.querySelector(".top");
+            if (top) top.style.display = "none";
+            document.body.style.paddingTop = "0.25rem";
+          }
+        } catch (_) {}
+      })();
+    </script>
+    <script src="/js/admin/unauthorized-banner.js"></script>
+    <script src="/js/admin/marketing.js"></script>
+  </body>
+</html>

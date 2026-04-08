@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Kurv — BAHR & Co</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/velden.css?v=bahr4" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="logo logo--bahr"
+        ><img src="/images/bahr-logo.png" width="44" height="44" alt="" decoding="async" /><span
+          class="logo--bahr-text"
+          >BAHR & Co</span
+        ></a
+      >
+      <button type="button" class="menu-toggle" data-menu-toggle aria-label="Åbn menu" aria-expanded="false">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+      <div class="nav-wrap">
+        <ul class="nav-main">
+          <li><a href="/shop.html">Shop</a></li>
+          <li><a href="/about.html">Om os</a></li>
+        </ul>
+      </div>
+      <div class="nav-actions">
+        <a href="/cart.html" class="cart-link"
+          >Kurv <span class="cart-count" data-cart-count data-empty="1"></span
+        ></a>
+      </div>
+    </header>
+
+    <main>
+      <div class="cart-layout">
+        <h1 class="section-title text-center" style="margin-bottom: 2rem">Din kurv</h1>
+        <div id="cart-root"></div>
+      </div>
+    </main>
+
+    <footer class="site-footer site-footer--minimal">
+      <p class="footer-bottom footer-bottom--minimal"><a href="/shop.html">Fortsæt med at shoppe</a></p>
+    </footer>
+
+    <script src="/js/velden-cart.js"></script>
+    <script src="/js/velden-ui.js"></script>
+    <script>
+      (function () {
+        var root = document.getElementById("cart-root");
+
+        function fmt(n) {
+          return new Intl.NumberFormat("da-DK", {
+            style: "currency",
+            currency: "DKK",
+            maximumFractionDigits: 0,
+          }).format(n);
+        }
+
+        function esc(v) {
+          if (v == null) return "";
+          return String(v)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        function safeImageUrl(url) {
+          var raw = String(url || "").trim();
+          if (!raw) return "";
+          if (/^https?:\/\//i.test(raw) || raw.charAt(0) === "/") return raw;
+          return "";
+        }
+
+        function render() {
+          var lines = VeldenCart.getCart();
+          if (!lines.length) {
+            root.innerHTML =
+              '<p class="message">Din kurv er tom.</p><p class="text-center"><a class="btn btn--ghost" href="/shop.html">Gå til shop</a></p>';
+            return;
+          }
+
+          var sub = 0;
+          var html =
+            lines
+              .map(function (line, i) {
+                var lineTotal = (line.price || 0) * (line.quantity || 1);
+                sub += lineTotal;
+                var meta = [line.color, line.size].filter(Boolean).join(" · ");
+                return (
+                  '<div class="cart-row">' +
+                  '<div class="cart-row__img"><img src="' +
+                  esc(safeImageUrl(line.image || "")) +
+                  '" alt="" width="200" height="267" /></div>' +
+                  '<div><div style="font-family:var(--font-serif);font-size:1.2rem;color:var(--navy);margin-bottom:0.35rem">' +
+                  esc(line.name || "") +
+                  "</div>" +
+                  (meta
+                    ? '<div style="font-size:0.85rem;color:var(--text-soft)">' + esc(meta) + "</div>"
+                    : "") +
+                  '<div class="cart-row__qty" style="margin-top:0.75rem">' +
+                  '<label class="field-label">Antal</label>' +
+                  '<select data-idx="' +
+                  i +
+                  '" class="qty-sel" style="padding:0.35rem 0.5rem;border:1px solid var(--line)">' +
+                  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+                    .map(function (n) {
+                      return (
+                        "<option value='" +
+                        n +
+                        "'" +
+                        (n === (line.quantity || 1) ? " selected" : "") +
+                        ">" +
+                        n +
+                        "</option>"
+                      );
+                    })
+                    .join("") +
+                  "</select>" +
+                  ' <button type="button" class="btn btn--ghost" data-remove="' +
+                  i +
+                  '" style="margin-left:0.5rem;padding:0.35rem 0.75rem;font-size:0.6rem">Fjern</button>' +
+                  "</div></div>" +
+                  '<div style="font-family:var(--font-serif);font-size:1.1rem">' +
+                  fmt(lineTotal) +
+                  "</div></div>"
+                );
+              })
+              .join("");
+
+          html +=
+            '<div class="cart-summary cart-summary--wide">' +
+            '<div class="cart-summary__row"><span>Subtotal</span><span>' +
+            fmt(sub) +
+            "</span></div>" +
+            '<p class="cart-summary__hint">På næste side angiver du leveringsadresse, vælger forsendelsesland og går til sikker betaling hos Stripe.</p>' +
+            '<a href="/checkout.html" class="btn btn--primary btn--block">Fortsæt til checkout</a>' +
+            "</div>";
+
+          root.innerHTML = html;
+
+          root.querySelectorAll(".qty-sel").forEach(function (sel) {
+            sel.addEventListener("change", function () {
+              VeldenCart.setQty(parseInt(sel.getAttribute("data-idx"), 10), sel.value);
+              render();
+            });
+          });
+          root.querySelectorAll("[data-remove]").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              VeldenCart.removeLine(parseInt(btn.getAttribute("data-remove"), 10));
+              render();
+            });
+          });
+        }
+
+        render();
+        window.addEventListener("velden-cart", render);
+      })();
+    </script>
+  </body>
+</html>

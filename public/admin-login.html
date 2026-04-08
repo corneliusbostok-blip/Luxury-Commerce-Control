@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>Adgang til dashboard · BAHR & Co</title>
+    <link rel="stylesheet" href="/css/velden.css?v=bahr4" />
+    <style>
+      .admin-login-wrap { max-width: 460px; margin: 8rem auto; padding: 2rem; background: #fff; border: 1px solid #e9e6df; border-radius: 12px; }
+      .admin-login-wrap h1 { margin: 0 0 0.75rem; }
+      .admin-login-wrap p { margin: 0 0 1rem; color: #666; }
+      .admin-login-row { display: grid; gap: 0.75rem; }
+      .admin-login-row input { padding: 0.75rem 0.9rem; border: 1px solid #d9d6cf; border-radius: 8px; }
+      .admin-login-row button { padding: 0.75rem 1rem; border: 0; border-radius: 999px; background: #111; color: #fff; cursor: pointer; }
+      .admin-login-err { margin-top: 0.8rem; color: #b00020; min-height: 1.2em; }
+    </style>
+  </head>
+  <body>
+    <main class="admin-login-wrap">
+      <h1>Dashboard adgang</h1>
+      <p>Indtast adgangskoden for at fortsætte til admin.</p>
+      <form id="admin-login-form" class="admin-login-row">
+        <input id="admin-secret" type="password" autocomplete="current-password" placeholder="Adgangskode" required />
+        <button type="submit">Åbn dashboard</button>
+      </form>
+      <div id="admin-login-err" class="admin-login-err"></div>
+      <p style="margin-top: 1rem"><a href="/shop.html">Tilbage til webshop</a></p>
+    </main>
+    <script>
+      (function () {
+        var form = document.getElementById("admin-login-form");
+        var input = document.getElementById("admin-secret");
+        var err = document.getElementById("admin-login-err");
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          err.textContent = "";
+          fetch("/api/admin/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ adminSecret: input.value.trim() }),
+          })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (x) {
+              if (!x.ok || !x.j || !x.j.ok) {
+                err.textContent = (x.j && x.j.error) || "Kunne ikke logge ind.";
+                return;
+              }
+              window.location.href = "/admin.html";
+            })
+            .catch(function () {
+              err.textContent = "Netværksfejl. Prøv igen.";
+            });
+        });
+      })();
+    </script>
+  </body>
+</html>
+

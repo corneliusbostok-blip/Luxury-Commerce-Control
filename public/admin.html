@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/images/bahr-logo.png" />
+    <title>BAHR & Co · Atelier</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/admin-dashboard.css?v=21" />
+  </head>
+  <body class="adm-body">
+    <header class="adm-topbar">
+      <div class="adm-topbar-inner">
+        <div class="adm-brand adm-brand--logo">
+          <img src="/images/bahr-logo.png" width="32" height="32" alt="" decoding="async" />
+          <span>BAHR & Co</span>
+          <span class="adm-brand-context">Luxury Commerce Control</span>
+        </div>
+        <div class="adm-top-actions adm-top-actions--with-secret">
+          <button type="button" class="adm-btn-ghost" data-admin-scroll-top>Top</button>
+          <a class="adm-btn-ghost adm-btn-primary" href="/shop.html">Webshop</a>
+        </div>
+      </div>
+      <div class="adm-tabs-wrap">
+        <nav class="adm-tabs" role="tablist" aria-label="Dashboard">
+          <button type="button" class="adm-tab is-active" data-page-tab="overview" role="tab" aria-selected="true">
+            Oversigt
+          </button>
+          <button type="button" class="adm-tab" data-page-tab="catalog" role="tab" aria-selected="false">Katalog</button>
+          <button type="button" class="adm-tab" data-page-tab="sourcing" role="tab" aria-selected="false">Sourcing</button>
+          <button type="button" class="adm-tab" data-page-tab="seo" role="tab" aria-selected="false">SEO</button>
+          <button type="button" class="adm-tab" data-page-tab="marketing" role="tab" aria-selected="false">
+            Marketing
+          </button>
+          <button type="button" class="adm-tab" data-page-tab="settings" role="tab" aria-selected="false">
+            Indstillinger
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <div class="adm-wrap">
+      <div class="adm-saas-layout">
+        <aside class="adm-sidebar" aria-label="Primary navigation">
+          <div class="adm-sidebar__title">Control Panel</div>
+          <button type="button" class="adm-side-link is-active" data-page-tab="overview">Overview</button>
+          <button type="button" class="adm-side-link" data-page-tab="catalog">Catalogue</button>
+          <button type="button" class="adm-side-link" data-page-tab="sourcing">Sourcing</button>
+          <button type="button" class="adm-side-link" data-page-tab="marketing">Marketing</button>
+          <button type="button" class="adm-side-link" data-page-tab="seo">SEO</button>
+          <button type="button" class="adm-side-link" data-page-tab="activity">Activity timeline</button>
+          <button type="button" class="adm-side-link" data-page-tab="settings">Settings</button>
+        </aside>
+        <div class="adm-main">
+      <div id="err-banner" class="adm-err"></div>
+
+      <div class="adm-page is-active" data-page="overview">
+        <section class="adm-cmd" aria-label="Operations overview">
+          <div class="adm-cmd-main">
+            <p class="adm-eyebrow">Internal catalogue</p>
+            <h1 class="adm-title">Atelier operations</h1>
+            <p class="adm-lead">
+              Quiet-luxury control surface for provenance, AI scoring, and automation cycles. Requires the Velden server
+              (<code>/admin</code>).
+            </p>
+            <p class="hint-muted">This AI automatically finds, evaluates and optimizes products based on your settings.</p>
+          </div>
+          <aside class="adm-cmd-aside">
+            <div id="refresh-meta" class="adm-refresh">—</div>
+            <div class="adm-engine-row">
+              <span id="ops-pulse-dot" class="adm-dot adm-dot--idle" aria-hidden="true"></span>
+              <span id="ops-pulse-label">—</span>
+              <span id="ai-status-pill"></span>
+            </div>
+            <dl class="adm-cmd-dl">
+              <dt>Next full cycle</dt>
+              <dd id="adm-next-cycle">—</dd>
+              <dt>Baggrundssourcing</dt>
+              <dd id="adm-sourcing-freq" title="">—</dd>
+            </dl>
+          </aside>
+        </section>
+
+        <div id="adm-kpi-grid" class="adm-kpi-grid" aria-label="Key metrics"></div>
+        <section class="adm-section" aria-label="Trend charts">
+          <div class="adm-grid-2" id="kpi-trend-charts">
+            <div class="adm-panel"><div class="adm-skeleton" style="height: 140px; border-radius: 8px"></div></div>
+            <div class="adm-panel"><div class="adm-skeleton" style="height: 140px; border-radius: 8px"></div></div>
+          </div>
+        </section>
+
+        <section class="adm-section" aria-label="AI command center panels">
+          <div class="adm-panel">
+            <h2 class="adm-section-head">AI Engine</h2>
+            <div class="adm-ai-engine-layout">
+              <div>
+                <div class="adm-top-status-grid">
+                  <div class="adm-top-status-card">
+                    <p class="adm-top-status-label">AI status</p>
+                    <p class="adm-top-status-value" id="cc-ai-status">—</p>
+                    <p class="adm-kpi__sub adm-kpi__sub--muted" id="cc-ai-status-desc">—</p>
+                  </div>
+                  <div class="adm-top-status-card">
+                    <p class="adm-top-status-label">Last automation run</p>
+                    <p class="adm-top-status-value" id="cc-last-run">—</p>
+                  </div>
+                  <div class="adm-top-status-card">
+                    <p class="adm-top-status-label">Last decision summary</p>
+                    <p class="adm-top-status-value" id="cc-last-decision">—</p>
+                  </div>
+                </div>
+                <div class="adm-control-grid" style="margin-top: 1rem">
+                  <div class="adm-control-row">
+                    <button type="button" id="btn-ai-start" class="adm-btn-ghost adm-btn-primary">Start AI</button>
+                    <button type="button" id="btn-ai-pause" class="adm-btn-ghost">Pause AI</button>
+                  </div>
+                  <div class="adm-field">
+                    <label for="ai-aggressiveness">Aggressiveness <span id="ai-aggressiveness-value">50</span></label>
+                    <input type="range" id="ai-aggressiveness" min="0" max="100" step="1" value="50" />
+                  </div>
+                  <div class="adm-field">
+                    <label for="ai-strategy">Strategy (mål)</label>
+                    <select id="ai-strategy" class="adm-select">
+                      <option value="maximize_profit">Maksimer profit</option>
+                      <option value="maximize_growth">Maksimer vækst</option>
+                      <option value="balanced">Balanceret</option>
+                    </select>
+                  </div>
+                  <p class="hint-muted" id="ai-control-status">—</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="adm-section" aria-label="AI live feed and insights">
+          <div class="adm-panel">
+            <h2 class="adm-section-head">AI insights</h2>
+            <div id="ai-insights" class="adm-insights-list"></div>
+          </div>
+        </section>
+
+        <section class="adm-section" aria-label="Fulfillment inbox">
+          <div class="adm-panel">
+            <h2 class="adm-section-head">Fulfillment Inbox</h2>
+            <p class="hint-muted">
+              eBay · Copy buyer + variant details, open the supplier listing, then mark complete when you have ordered.
+            </p>
+            <div id="fulfillment-inbox-toast" class="adm-inbox-toast" role="status" aria-live="polite" hidden></div>
+            <p id="fulfillment-inbox-meta" class="hint-muted adm-inbox-meta"></p>
+            <div id="fulfillment-inbox-list" class="adm-inbox-list" aria-live="polite">
+              <div class="adm-inbox-empty">Loading…</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="adm-section" aria-label="Order fulfillment">
+          <div class="adm-panel">
+            <h2 class="adm-section-head">Order fulfillment</h2>
+            <p class="hint-muted">Automatisk leverandoer-routing efter betalt ordre.</p>
+            <div class="adm-catalog-scroll">
+              <table class="adm-table" id="fulfillment-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Customer</th>
+                    <th class="text-end">Amount</th>
+                    <th>Status</th>
+                    <th>Last update</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="fulfillment-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="adm-page" data-page="activity">
+        <section class="adm-section" aria-label="Activity timeline">
+          <div class="adm-panel">
+            <h2 class="adm-section-head">Activity timeline</h2>
+            <div id="ai-activity-feed" class="adm-feed-list"></div>
+          </div>
+        </section>
+        <section class="adm-section" aria-label="Since last visit">
+          <div class="adm-panel">
+            <h2 class="adm-section-head">What changed since last visit</h2>
+            <div id="since-last-visit" class="adm-top-status-grid"></div>
+          </div>
+        </section>
+        <section class="adm-section" aria-label="Sourcing runs">
+          <h2 class="adm-section-head">Sourcing runs</h2>
+          <p class="hint-muted">
+            Ét kørsel pr. batch — kilder, kategorier, og hvorfor produkter blev godkendt eller afvist. Data fra det samme AI-log som nedenfor (ingen ekstra API).
+          </p>
+          <div class="adm-panel adm-sourcing-runs-wrap">
+            <div id="sourcing-runs-list" class="adm-sourcing-runs-list" aria-live="polite"></div>
+            <div id="sourcing-runs-ungrouped" class="adm-sourcing-runs-ungrouped" hidden></div>
+            <div id="sourcing-runs-detail" class="adm-sourcing-runs-detail" hidden></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="adm-page" data-page="catalog">
+        <section class="adm-section">
+          <h2 class="adm-section-head">Product catalogue</h2>
+          <p class="hint-muted">
+            Origin shows platform, supplier, territory, and import path. Only <strong>approved</strong> sourcing is visible
+            on the storefront.
+          </p>
+          <div class="adm-panel">
+            <div class="adm-attention" id="attention-strip" style="display: none">
+              <span class="label">Needs attention</span>
+              <span id="attention-inner"></span>
+            </div>
+
+            <div class="adm-filter-layout">
+              <div class="adm-filter-grid">
+                <div class="adm-field adm-field--search">
+                  <label for="f-search">Search</label>
+                  <input type="search" id="f-search" placeholder="Product name…" autocomplete="off" />
+                </div>
+                <div class="adm-field">
+                  <label for="f-status">Sourcing status</label>
+                  <select id="f-status">
+                    <option value="">All</option>
+                    <option value="approved">Approved</option>
+                    <option value="draft">Draft</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="missing-source">Missing source</option>
+                  </select>
+                </div>
+                <div class="adm-field">
+                  <label for="f-platform">Platform</label>
+                  <select id="f-platform"><option value="">All</option></select>
+                </div>
+                <div class="adm-field">
+                  <label for="f-country">Country</label>
+                  <select id="f-country"><option value="">All</option></select>
+                </div>
+                <div class="adm-field">
+                  <label for="f-import">Import</label>
+                  <select id="f-import"><option value="">All</option></select>
+                </div>
+                <div class="adm-field">
+                  <label for="f-smin">Min AI</label>
+                  <input type="number" id="f-smin" min="0" max="100" placeholder="—" />
+                </div>
+                <div class="adm-field">
+                  <label for="f-smax">Max AI</label>
+                  <input type="number" id="f-smax" min="0" max="100" placeholder="—" />
+                </div>
+                <button type="button" class="adm-btn-ghost" id="btn-trash-toggle" aria-pressed="false">Papirkurv</button>
+                <button type="button" class="adm-filter-reset" id="f-reset">Reset</button>
+              </div>
+            </div>
+
+            <div class="adm-catalog-scroll">
+              <table class="adm-table" id="catalog-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th class="text-end">Price</th>
+                    <th>Status</th>
+                    <th>Origin</th>
+                    <th>Score</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="catalog-body"></tbody>
+              </table>
+            </div>
+            <div id="catalog-empty" class="adm-empty-catalog" style="display: none"></div>
+            <div id="catalog-empty-filter" class="adm-empty-filter" style="display: none">
+              Ingen rækker matcher filtrene.
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="adm-page" data-page="settings">
+        <section class="adm-section" aria-label="Settings">
+          <h2 class="adm-section-head">Indstillinger</h2>
+          <div class="adm-grid-2">
+            <div class="adm-panel">
+              <h3 class="adm-section-head">Store config</h3>
+              <div class="adm-field"><label for="cfg-brand">Brand</label><input type="text" id="cfg-brand" placeholder="Velden" /></div>
+              <div class="adm-field">
+                <label style="display: flex; gap: 0.5rem; align-items: flex-start">
+                  <input type="checkbox" id="cfg-auto-product-import" checked style="margin-top: 0.2rem" />
+                  <span
+                    ><strong>Automatisk vareimport</strong> — baggrundssourcing kører på et fast interval og henter nye
+                    kandidater fra alle valgte og aktiverede kilder (web, Shopify, eBay …). Standard er <strong>hvert 10.
+                    minut</strong> (<code>SOURCING_INTERVAL_MINUTES=10</code> eller <code>SOURCING_INTERVAL_MS=600000</code> i
+                    <code>.env</code>). Slå fra for at stoppe
+                    automatisk hentning (chat og manuelle import-flows virker stadig).</span
+                  >
+                </label>
+              </div>
+              <div class="adm-field"><label for="cfg-price-min">Pris min</label><input type="range" id="cfg-price-min" min="0" max="10000" step="10" /></div>
+              <div class="adm-field"><label for="cfg-price-max">Pris max</label><input type="range" id="cfg-price-max" min="0" max="10000" step="10" /></div>
+              <div class="adm-field"><label for="cfg-price-preview">Pris interval</label><input type="text" id="cfg-price-preview" readonly /></div>
+              <div class="adm-field">
+                <span class="adm-field-eyebrow">Butikstype (filtrerer listen nedenfor)</span>
+                <label class="sr-only" for="cfg-vertical-select">Vælg butikstype</label>
+                <select id="cfg-vertical-select" class="adm-select" autocomplete="off"></select>
+                <p class="hint-muted" style="margin-top: 0.4rem; margin-bottom: 0">
+                  Dropdown’en afgrænser <strong>hvilke slugs du kan vælge</strong> i næste boks — én niche ad gangen eller
+                  <strong>Alle kategorier</strong> for hele taxonomien. Uanset butikstype er det <strong>chipsene under</strong>,
+                  der bestemmer, hvad der faktisk må importeres.
+                </p>
+              </div>
+              <div class="adm-field" id="import-categories-anchor" tabindex="-1">
+                <span class="adm-field-eyebrow">Hvad må importeres (tilladte kategorier)</span>
+                <p class="hint-muted" style="margin-top: 0; margin-bottom: 0.45rem">
+                  Samme liste styrer <strong>hele automatisk import</strong>: web (seeds + crawl), Shopify, eBay og øvrige
+                  kilder du slår til. Serveren begrænser web-discovery til disse kategorier og afviser kandidater, der ikke
+                  matcher (uanset kilde). Skift butikstype for at browse flere slugs, tilføj chips, og <strong>Gem config</strong>.
+                </p>
+                <label class="sr-only" for="cfg-category-pick">Tilføj kategori</label>
+                <div class="adm-select-row">
+                  <select id="cfg-category-pick" class="adm-select" autocomplete="off">
+                    <option value="">Vælg kategori…</option>
+                  </select>
+                  <button type="button" class="adm-btn-ghost adm-chip-add-btn" id="btn-category-add">Tilføj</button>
+                </div>
+                <div id="cfg-category-chips" class="adm-chip-row" aria-label="Valgte kategorier"></div>
+                <input type="hidden" id="cfg-cats" value="" />
+                <p class="hint-muted" id="cfg-import-categories-summary" style="margin-top: 0.55rem; margin-bottom: 0"></p>
+              </div>
+              <div class="adm-field">
+                <span class="adm-field-eyebrow">Blokerede nøgleord</span>
+                <p class="hint-muted" style="margin-top: 0; margin-bottom: 0.4rem">
+                  Produkter hvis titel indeholder et af ordene afvises ved sourcing. Skriv ét eller flere adskilt med komma
+                  — klik <strong>Tilføj</strong> eller tryk Enter.
+                </p>
+                <label class="sr-only" for="cfg-blocked-input">Tilføj blokeret nøgleord</label>
+                <div class="adm-select-row">
+                  <input
+                    type="text"
+                    id="cfg-blocked-input"
+                    class="adm-input-narrow"
+                    placeholder="fx women, kids, bulk"
+                    autocomplete="off"
+                  />
+                  <button type="button" class="adm-btn-ghost adm-chip-add-btn" id="btn-blocked-add">Tilføj</button>
+                </div>
+                <div id="cfg-blocked-chips" class="adm-chip-row" aria-label="Blokerede nøgleord"></div>
+                <input type="hidden" id="cfg-blocked" value="" />
+              </div>
+              <div class="adm-field">
+                <span class="adm-field-eyebrow">Sortimentsfokus (sourcing)</span>
+                <p class="hint-muted" style="margin-top: 0; margin-bottom: 0.4rem">
+                  Styr hvad AI og markedsplads-søgning skal lægge vægt på ud over dine kategorier — fx hypede varer, en bestemt
+                  sæson eller tidløs stil. Markedspladser (fx eBay) kan få korte engelske tilføjelser ud fra valget.
+                </p>
+                <label class="sr-only" for="cfg-merch-focus">Prioritet for nye varer</label>
+                <select id="cfg-merch-focus" class="adm-select" autocomplete="off">
+                  <option value="balanced">Balanceret</option>
+                  <option value="trending">Trending / hypet</option>
+                  <option value="seasonal">Sæson eller kollektion</option>
+                  <option value="timeless">Tidløst / klassisk</option>
+                </select>
+                <label for="cfg-merch-season" style="margin-top: 0.65rem; display: block">Sæson eller kollektion (valgfrit)</label>
+                <input
+                  type="text"
+                  id="cfg-merch-season"
+                  class="adm-input-narrow"
+                  placeholder="fx SS26, vinter 26, resort, høst, jul …"
+                  maxlength="160"
+                  autocomplete="off"
+                />
+                <label for="cfg-merch-vibe" style="margin-top: 0.5rem; display: block">Ekstra vibe eller søgeord (valgfrit)</label>
+                <input
+                  type="text"
+                  id="cfg-merch-vibe"
+                  class="adm-input-narrow"
+                  placeholder="fx minimalist, outdoor, streetwear, quiet luxury …"
+                  maxlength="500"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="adm-field">
+                <span class="adm-field-eyebrow">Mål</span>
+                <label class="sr-only" for="cfg-goal">Mål for AI-strategi</label>
+                <select id="cfg-goal" class="adm-select" autocomplete="off">
+                  <option value="maximize_profit">Maksimer profit</option>
+                  <option value="maximize_growth">Maksimer vækst</option>
+                  <option value="balanced">Balanceret (profit og vækst)</option>
+                </select>
+                <p class="hint-muted" style="margin-top: 0.4rem; margin-bottom: 0">
+                  Styrer hvad automationen prioriterer (samme valg som «Strategy» under Oversigt).
+                </p>
+              </div>
+              <div class="adm-field">
+                <span class="adm-field-eyebrow">Risiko</span>
+                <label class="sr-only" for="cfg-risk">Risikoprofil</label>
+                <select id="cfg-risk" class="adm-select" autocomplete="off">
+                  <option value="balanced">Balanceret</option>
+                  <option value="aggressive">Aggressiv (højere risiko)</option>
+                  <option value="conservative">Forsigtig (lavere risiko)</option>
+                </select>
+              </div>
+              <div class="adm-field">
+                <label for="cfg-max-catalog">Maks. godkendte produkter i kataloget</label>
+                <input
+                  type="number"
+                  id="cfg-max-catalog"
+                  class="adm-input-narrow"
+                  min="0"
+                  max="50000"
+                  step="1"
+                  placeholder="0 = ingen grænse"
+                  autocomplete="off"
+                />
+                <p class="hint-muted" style="margin-top: 0.4rem; margin-bottom: 0">
+                  Tæller kun aktive varer der er klar til shop (godkendt sourcing). Ved <strong>0</strong> er der ingen
+                  grænse. Når tallet er nået, henter AI ikke flere automatisk, før der er plads igen (fx efter
+                  fjernelse af svage varer).
+                </p>
+              </div>
+              <div class="adm-field">
+                <span class="adm-field-eyebrow">Leverandører / kilder</span>
+                <label class="sr-only" for="cfg-source-pick">Tilføj leverandør</label>
+                <div class="adm-select-row">
+                  <select id="cfg-source-pick" class="adm-select" autocomplete="off">
+                    <option value="">Vælg kilde…</option>
+                  </select>
+                  <button type="button" class="adm-btn-ghost adm-chip-add-btn" id="btn-source-add">Tilføj</button>
+                </div>
+                <div id="cfg-source-chips" class="adm-chip-row" aria-label="Valgte kilder"></div>
+                <input type="hidden" id="cfg-sources" value="" />
+                <p class="hint-muted" id="cfg-sources-pick-hint" style="margin-top: 0.4rem">
+                  <strong>Først</strong> sæt tilladte kategorier i «Hvad må importeres» — derefter vælg kilder. Alle aktive
+                  kilder bruger samme kategori-liste: web filtrerer seeds/crawl, markedspladser målretter søgning, og
+                  kandidater uden for listen afvises efter hentning (plus brand-fit, pris, blokerede ord osv.).
+                </p>
+                <div class="adm-sourcing-health-row" style="margin-top: 0.75rem">
+                  <button type="button" id="btn-sourcing-health" class="adm-btn-sourcing-health">
+                    Test leverandør-adgang
+                  </button>
+                  <pre id="sourcing-health-log" class="adm-sourcing-health-log" aria-live="polite"></pre>
+                </div>
+                <p class="hint-muted" style="margin-top: 0.4rem; max-width: 52rem; margin-bottom: 0">
+                  «Test leverandør-adgang» kalder eBay OAuth + Browse API (når eBay er valgt som kilde). Brug
+                  <strong>Production</strong>-nøgler medmindre du sætter <code>EBAY_USE_SANDBOX=true</code> i
+                  <code>.env</code>. Valgfrit: <code>EBAY_MARKETPLACE_ID</code> (fx <code>EBAY_DE</code>,
+                  <code>EBAY_GB</code>) hvis ping fejler. eBay App ID og hemmeligheder angives
+                  <strong>nedenfor under Markedspladser</strong> og gemmes i Supabase — ikke i <code>.env</code>
+                  (Supabase-nøglen i <code>.env</code> er kun til databasen). Hovedafbryderen <strong>Automatisk vareimport</strong>
+                  (øverst i Indstillinger eller under Katalog &amp; CEO) styrer om serveren må hente nye kandidater. Dine
+                  <strong>tilladte kategorier</strong> gælder for alle kilder; for eBay skal kilden og eBay-provider være slået til.
+                </p>
+              </div>
+              <div class="adm-field adm-conditional-source" id="cfg-section-web" hidden style="margin-top: 1rem">
+                <h4 class="adm-subhead">Sourcing · web (seed-URL)</h4>
+                <p class="hint-muted" style="margin-bottom: 0.5rem">
+                  merges med <code>DISCOVERY_SEED_*</code> i miljø. Når du har tilladte kategorier, bruges kun seeds der matcher
+                  dem (inkl. <code>seedsByCategory</code> pr. slug). Vælg <strong>web</strong> under kilder for scrape/import.
+                </p>
+                <label style="display: flex; gap: 0.5rem; align-items: center">
+                  <input type="checkbox" id="cfg-web-enabled" checked />
+                  <span>Aktivér HTTP/seed-discovery</span>
+                </label>
+                <p class="hint-muted" id="cfg-web-detail-hint" style="margin-top: 0.45rem; margin-bottom: 0" hidden>
+                  Slå «Aktivér» til for at redigere seed-URL’er.
+                </p>
+                <div id="cfg-web-detail-fields">
+                  <label for="cfg-web-seeds-global" style="margin-top: 0.65rem; display: block">Globale seed-URL’er (https, én pr. linje eller komma)</label>
+                  <textarea id="cfg-web-seeds-global" class="adm-textarea-code" rows="4" placeholder="https://example.com/collection"></textarea>
+                  <label for="cfg-web-seeds-by-cat" style="margin-top: 0.65rem; display: block"
+                    >Per kategori (JSON, valgfrit)</label
+                  >
+                  <textarea
+                    id="cfg-web-seeds-by-cat"
+                    class="adm-textarea-code"
+                    rows="5"
+                    placeholder='{"shoes":["https://..."],"shirts":["https://..."]}'
+                  ></textarea>
+                </div>
+              </div>
+              <div class="adm-field adm-conditional-source" id="cfg-section-shopify" hidden style="margin-top: 1rem">
+                <h4 class="adm-subhead">Sourcing · Shopify (Admin API + offentlig JSON)</h4>
+                <p class="hint-muted" style="margin-bottom: 0.5rem">
+                  Med token + <strong>*.myshopify.com</strong>-host hentes via Admin REST; ellers bruges offentlig <code>/products.json</code>. Vælg <strong>shopify</strong> under kilder. Produkter uden for dine <strong>tilladte kategorier</strong>
+                  afvises efter hentning (samme regel som for øvrige kilder). Manuel import: «Katalog &amp; CEO».
+                </p>
+                <label style="display: flex; gap: 0.5rem; align-items: center">
+                  <input type="checkbox" id="cfg-shopify-enabled" />
+                  <span>Aktivér Shopify-provider til automation</span>
+                </label>
+                <p class="hint-muted" id="cfg-shopify-detail-hint" style="margin-top: 0.45rem; margin-bottom: 0" hidden>
+                  Slå «Aktivér Shopify-provider» til for at angive butik, token osv.
+                </p>
+                <div id="cfg-shopify-detail-fields" hidden>
+                  <label for="cfg-shopify-store-url" style="margin-top: 0.65rem; display: block">Butiks-URL (https)</label>
+                  <input
+                    type="url"
+                    id="cfg-shopify-store-url"
+                    class="adm-input-narrow"
+                    placeholder="https://din-butik.dk eller https://din-butik.myshopify.com"
+                    autocomplete="off"
+                  />
+                  <label for="cfg-shopify-admin-host" style="margin-top: 0.5rem; display: block"
+                    >Admin API-butik (valgfrit, ved custom domæne)</label
+                  >
+                  <input
+                    type="text"
+                    id="cfg-shopify-admin-host"
+                    class="adm-input-narrow"
+                    placeholder="fx din-butik.myshopify.com"
+                    autocomplete="off"
+                  />
+                  <label for="cfg-shopify-collection-handle" style="margin-top: 0.5rem; display: block"
+                    >Kollektion til automation (valgfrit, handle)</label
+                  >
+                  <input
+                    type="text"
+                    id="cfg-shopify-collection-handle"
+                    class="adm-input-narrow"
+                    placeholder="fx sommer-skirts"
+                    autocomplete="off"
+                  />
+                  <label for="cfg-shopify-admin-token" style="margin-top: 0.5rem; display: block">Admin API access token</label>
+                  <input
+                    type="password"
+                    id="cfg-shopify-admin-token"
+                    class="adm-input-narrow"
+                    placeholder="Tom = behold eksisterende token"
+                    autocomplete="new-password"
+                  />
+                  <p class="hint-muted" id="cfg-shopify-token-hint" style="margin-top: 0.35rem"></p>
+                </div>
+              </div>
+              <div class="adm-field adm-conditional-source" id="cfg-section-ebay" hidden style="margin-top: 1rem">
+                <h4 class="adm-subhead">Sourcing · eBay (Browse API)</h4>
+                <p class="hint-muted" style="margin-bottom: 0.5rem">
+                  Kræver <strong>eBay</strong> under kilder og gyldige nøgler under Markedspladser. Søgning roterer ud fra de
+                  samme <strong>tilladte kategorier</strong> som web/Shopify (ét tilfældigt udvalg pr. kald). Uden kategorier kan du
+                  sætte <code>EBAY_DISCOVERY_QUERY</code> i miljø som reserve for eBay.
+                </p>
+                <p class="hint-muted" style="margin-bottom: 0.65rem">
+                  <a href="#import-categories-anchor">Redigér tilladte kategorier</a> (gælder alle importkilder).
+                </p>
+                <label style="display: flex; gap: 0.5rem; align-items: center">
+                  <input type="checkbox" id="cfg-ebay-browse-enabled" />
+                  <span>Medtag eBay i automatisk vareimport (Browse API)</span>
+                </label>
+              </div>
+              <div class="adm-field" style="margin-top: 1.25rem">
+                <p class="hint-muted" id="int-marketplaces-pick-hint" style="margin-bottom: 0.65rem">
+                  Vælg <strong>eBay</strong> og/eller <strong>Alibaba</strong> under «Kilder» ovenfor for at vise API-felter til den markedsplads.
+                </p>
+                <div id="int-marketplaces-header" hidden>
+                  <h4 class="adm-subhead">Markedspladser · API (gemmes i Supabase store_config — hemmeligheder sendes ikke tilbage til browseren)</h4>
+                  <p class="hint-muted" style="margin-bottom: 0.65rem">
+                    Kun for valgte kilder. Tomt hemmeligt felt = behold nuværende nøgle. Samme mønster som Shopify
+                    Admin-token: ligger i databasen, ikke i kildekode eller som <code>SUPABASE_SERVICE_ROLE_KEY</code>.
+                  </p>
+                </div>
+                <div id="int-section-ebay" hidden>
+                  <label for="int-ebay-client-id">eBay · App ID (Client ID)</label>
+                  <input type="text" id="int-ebay-client-id" class="adm-input-narrow" placeholder="fx fra developer.ebay.com" autocomplete="off" />
+                  <label for="int-ebay-dev-id" style="margin-top: 0.5rem">eBay · Dev ID (valgfrit)</label>
+                  <input type="text" id="int-ebay-dev-id" class="adm-input-narrow" autocomplete="off" />
+                  <label for="int-ebay-client-secret" style="margin-top: 0.5rem">eBay · Client secret</label>
+                  <input type="password" id="int-ebay-client-secret" class="adm-input-narrow" placeholder="kun ved ny nøgle" autocomplete="new-password" />
+                  <label for="int-ebay-oauth" style="margin-top: 0.5rem">eBay · OAuth / refresh token (valgfrit)</label>
+                  <input type="password" id="int-ebay-oauth" class="adm-input-narrow" placeholder="kun ved ny token" autocomplete="new-password" />
+                  <p class="hint-muted" style="margin-top: 0.55rem; margin-bottom: 0">
+                    Med <strong>App ID + Client secret</strong> (client credentials) behøver du <strong>ikke</strong> udfylde
+                    OAuth-feltet — hverken i sandbox eller production. OAuth-feltet er til bruger-/refresh-token-flow.
+                    App ID med <code>-SBX-</code> (sandbox) bruger automatisk eBays sandbox-API; du kan også sætte
+                    <code>EBAY_USE_SANDBOX=true</code> i <code>.env</code>. Hvis token fejler med «invalid_scope», sæt
+                    <code>EBAY_OAUTH_SCOPE</code> i <code>.env</code> som eBay viser under Application Keys → OAuth scopes.
+                  </p>
+                </div>
+                <div id="int-section-alibaba" hidden style="margin-top: 0.85rem">
+                  <label for="int-alibaba-key">Alibaba / Open API · App key</label>
+                  <input type="text" id="int-alibaba-key" class="adm-input-narrow" autocomplete="off" />
+                  <label for="int-alibaba-secret" style="margin-top: 0.5rem">Alibaba · App secret</label>
+                  <input type="password" id="int-alibaba-secret" class="adm-input-narrow" placeholder="kun ved ny nøgle" autocomplete="new-password" />
+                  <label for="int-alibaba-token" style="margin-top: 0.5rem">Alibaba · Access token (valgfrit)</label>
+                  <input type="password" id="int-alibaba-token" class="adm-input-narrow" placeholder="kun ved ny token" autocomplete="new-password" />
+                </div>
+                <p class="hint-muted" id="int-api-hint" style="margin-top: 0.5rem" hidden></p>
+              </div>
+              <p style="margin-top: 0.75rem">
+                <button type="button" class="adm-btn-ghost adm-btn-primary" id="btn-save-config">Gem config</button>
+                <span class="hint-muted" id="cfg-status"></span>
+              </p>
+            </div>
+            <div class="adm-panel">
+              <h3 class="adm-section-head">Katalog &amp; CEO</h3>
+              <div class="adm-catalog-ops">
+                <div class="adm-field">
+                  <label>Automatisk vareimport</label>
+                  <button type="button" id="btn-auto-import-toggle" class="adm-btn-ghost">—</button>
+                  <p class="hint-muted" id="auto-import-hint" style="margin-top: 0.5rem"></p>
+                </div>
+                <div class="adm-field">
+                  <label>CEO-automation</label>
+                  <button type="button" id="btn-ceo-toggle" class="adm-btn-ghost">—</button>
+                  <p class="hint-muted" id="ceo-pause-hint" style="margin-top: 0.5rem"></p>
+                </div>
+                <div class="adm-field">
+                  <label for="purge-confirm-input">Katalog · slet alt</label>
+                  <p class="hint-muted" style="margin: 0.35rem 0 0.5rem">
+                    Skriv præcis <code>SLET_ALLE_PRODUKTER</code> i feltet, klik derefter knappen (undgår tastefejl fra prompt).
+                  </p>
+                  <input
+                    type="text"
+                    id="purge-confirm-input"
+                    class="adm-input-narrow"
+                    placeholder="SLET_ALLE_PRODUKTER"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button type="button" id="btn-purge-all" class="adm-btn-ghost adm-btn-danger" style="margin-top: 0.55rem">
+                    Slet alle produkter
+                  </button>
+                </div>
+              </div>
+              <div class="adm-field" style="margin-top: 1.25rem">
+                <label for="shopify-import-url">Shopify — rod-URL eller kollektion</label>
+                <input type="url" id="shopify-import-url" placeholder="https://butik.dk eller …/collections/comfort-shirts" autocomplete="off" style="max-width: 28rem; display: block; margin-top: 0.35rem" />
+                <label for="shopify-collection-handle" style="margin-top: 0.75rem">Kollektions-handle (valgfrit, hvis du kun indtaster rod-URL)</label>
+                <input type="text" id="shopify-collection-handle" placeholder="fx comfort-shirts" autocomplete="off" style="max-width: 16rem; display: block; margin-top: 0.35rem" />
+                <label for="shopify-force-category" style="margin-top: 0.75rem">Tving kategori-slug (valgfrit)</label>
+                <input type="text" id="shopify-force-category" placeholder="fx shirts, polos, trousers" autocomplete="off" style="max-width: 16rem; display: block; margin-top: 0.35rem" />
+                <button type="button" id="btn-shopify-import" class="adm-btn-ghost adm-btn-primary" style="margin-top: 0.65rem">Importér fra Shopify JSON</button>
+                <p class="hint-muted" id="shopify-import-status" style="margin-top: 0.5rem"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="adm-page" data-page="sourcing">
+        <section class="adm-section" id="sourcing-chat-section">
+          <h2 class="sr-only">Live sourcing</h2>
+          <div class="adm-sourcing-card">
+            <div class="adm-sc-thread" id="sourcing-chat-thread" aria-live="polite" aria-label="Sourcing chat"></div>
+            <div class="adm-sc-foot">
+              <div class="adm-sc-loading" id="sourcing-chat-loading" style="display: none">Arbejder …</div>
+              <div class="adm-sc-row">
+                <input
+                  type="text"
+                  id="sourcing-chat-input"
+                  placeholder="Sourcing prompt, eller ja / nej …"
+                  autocomplete="off"
+                />
+                <button type="button" id="sourcing-chat-send">Send</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="adm-section" aria-label="Sourcing candidate review queue">
+          <div class="adm-panel">
+            <h3 class="adm-subhead">Pending sourcing candidates</h3>
+            <p class="hint-muted">Review queue fra auto-approval: godkend til katalog eller afvis med grund.</p>
+            <div class="adm-catalog-scroll">
+              <table class="adm-table" aria-label="Sourcing candidate review">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Source</th>
+                    <th class="text-end">AI</th>
+                    <th>Popularity</th>
+                    <th>Reason</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="sourcing-candidates-body">
+                  <tr>
+                    <td colspan="6" class="hint-muted">Loading candidates...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="adm-page" data-page="seo">
+        <section class="adm-section">
+          <h2 class="adm-section-head">SEO · dansk</h2>
+          <p id="seo-page-status" class="adm-seo-status" role="status">Åbn fanen for at indlæse listen.</p>
+          <p style="margin: 1rem 0">
+            <button type="button" class="adm-btn-ghost" id="seo-refresh">Genindlæs produkter</button>
+          </p>
+          <div class="adm-catalog-scroll">
+            <table class="adm-table" aria-label="SEO produkter">
+              <thead>
+                <tr>
+                  <th>Produkt</th>
+                  <th>Meta</th>
+                  <th>SEO-tjek</th>
+                  <th>Handling</th>
+                </tr>
+              </thead>
+              <tbody id="seo-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div class="adm-page" data-page="marketing">
+        <section class="adm-section">
+          <h2 class="adm-section-head">Marketing</h2>
+          <p class="hint-muted">Connect platforme, test posts og styr AI marketing direkte i dashboardet.</p>
+          <div class="adm-grid-2" style="margin-top: 0.75rem">
+            <div class="adm-panel" style="grid-column: 1 / -1">
+              <h3 class="adm-subhead">1) Platform Connect</h3>
+              <div id="platform-grid" class="adm-grid-3"></div>
+            </div>
+            <div class="adm-panel">
+              <h3 class="adm-subhead">2) Auto Marketing Settings</h3>
+              <div class="adm-field"><label><input type="checkbox" id="mk-enabled" /> Enable AI Marketing</label></div>
+              <div class="adm-field"><label><input type="checkbox" id="mk-new-product" /> Post on new product</label></div>
+              <div class="adm-field"><label><input type="checkbox" id="mk-price-drop" /> Post on price drop</label></div>
+              <div class="adm-field"><label><input type="checkbox" id="mk-trending" /> Post on trending product</label></div>
+              <div class="adm-field">
+                <label>Max posts per day: <span id="mk-max-label">3</span></label>
+                <input id="mk-max-posts" type="range" min="1" max="20" value="3" />
+              </div>
+              <button id="save-settings" class="adm-btn-ghost adm-btn-primary">Save settings</button>
+            </div>
+            <div class="adm-panel">
+              <h3 class="adm-subhead">3) Preview / Test</h3>
+              <div class="adm-field">
+                <label for="manual-product">Product for manual post</label>
+                <select id="manual-product" class="adm-select">
+                  <option value="">Auto (best product)</option>
+                </select>
+              </div>
+              <div class="adm-field" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+                <select id="test-platform" class="adm-select">
+                  <option value="facebook">Facebook</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="tiktok">TikTok</option>
+                </select>
+                <button id="generate-test" class="adm-btn-ghost adm-btn-primary">Generate Test Post</button>
+              </div>
+              <div style="display: grid; grid-template-columns: 140px 1fr; gap: 0.75rem; margin-top: 0.75rem">
+                <img id="preview-image" alt="Preview image" style="width: 100%; min-height: 120px; border-radius: 8px; object-fit: cover; background: #f0ece5" />
+                <div>
+                  <div id="preview-caption">No preview yet.</div>
+                  <div id="preview-tags" class="hint-muted" style="margin-top: 0.35rem"></div>
+                  <div style="margin-top: 0.35rem"><a id="preview-link" href="#" target="_blank" rel="noopener">Open product page</a></div>
+                  <div id="mk-notice" class="hint-muted" style="margin-top: 0.35rem; min-height: 1.2em"></div>
+                </div>
+              </div>
+            </div>
+            <div class="adm-panel" style="grid-column: 1 / -1">
+              <h3 class="adm-subhead">4) Recent Posts</h3>
+              <div id="posts-list"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <p class="adm-footnote"><a href="/">← Storefront</a></p>
+      </div>
+      </div>
+    </div>
+
+    <div class="adm-modal-overlay" id="modal-overlay" role="dialog" aria-modal="true">
+      <div class="adm-modal">
+        <div class="adm-modal-h">
+          <h3 id="modal-title">Details</h3>
+          <button type="button" class="adm-modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="adm-modal-body" id="modal-body"></div>
+      </div>
+    </div>
+
+    <button type="button" class="adm-ai-face adm-ai-face--idle" id="ai-face" aria-label="AI-assistent — åbn chat">
+      <span class="adm-ai-bot" aria-hidden="true">
+        <span class="adm-ai-bot__antenna"></span>
+        <span class="adm-ai-bot__head">
+          <span class="adm-ai-face__eyes">
+            <span class="adm-ai-eye adm-ai-eye--left"></span>
+            <span class="adm-ai-eye adm-ai-eye--right"></span>
+          </span>
+          <span class="adm-ai-face__mouth"></span>
+        </span>
+      </span>
+      <div class="adm-ai-face__bubble" id="ai-face-bubble" aria-live="polite">
+        <div class="adm-ai-bubble-stack" id="ai-face-bubble-stack"></div>
+      </div>
+      <span class="adm-ai-face__tooltip" id="ai-face-tooltip">AI — klik for at chatte</span>
+    </button>
+
+    <script src="/js/admin/unauthorized-banner.js"></script>
+    <script src="/js/common/api-client.js"></script>
+    <script type="module" src="/js/admin/app.js?v=35"></script>
+    <script src="/js/admin/marketing.js?v=2"></script>
+  </body>
+</html>
