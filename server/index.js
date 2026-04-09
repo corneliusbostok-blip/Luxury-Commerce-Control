@@ -3214,30 +3214,30 @@ app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
       ).neq("status", "removed");
 
       const catSelectFull =
-        "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, image_urls, supplier_variants, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, color_variants, style_key, description, selling_points, seo_meta_title, seo_meta_description, seo_last_checked_at";
+        "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, style_key, seo_last_checked_at";
       const catSelectLite =
-        "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, image_urls, supplier_variants, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, color_variants, style_key, description, selling_points, seo_last_checked_at";
+        "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, style_key";
       const catSelectLegacy =
-        "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, image_urls, supplier_variants, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, color_variants, style_key, description, selling_points";
+        "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at";
       let catQActive = await supabase
         .from("products")
         .select(catSelectFull)
         .neq("status", "removed")
         .order("updated_at", { ascending: false })
-        .limit(200);
+        .limit(120);
       let catQRemoved = await supabase
         .from("products")
         .select(catSelectFull)
         .eq("status", "removed")
         .order("updated_at", { ascending: false })
-        .limit(120);
+        .limit(80);
       if (catQActive.error) {
         catQActive = await supabase
           .from("products")
           .select(catSelectLite)
           .neq("status", "removed")
           .order("updated_at", { ascending: false })
-          .limit(200);
+          .limit(120);
       }
       if (catQRemoved.error) {
         catQRemoved = await supabase
@@ -3245,7 +3245,7 @@ app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
           .select(catSelectLite)
           .eq("status", "removed")
           .order("updated_at", { ascending: false })
-          .limit(120);
+          .limit(80);
       }
       if (catQActive.error) {
         catQActive = await supabase
@@ -3253,7 +3253,7 @@ app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
           .select(catSelectLegacy)
           .neq("status", "removed")
           .order("updated_at", { ascending: false })
-          .limit(200);
+          .limit(120);
       }
       if (catQRemoved.error) {
         catQRemoved = await supabase
@@ -3261,7 +3261,7 @@ app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
           .select(catSelectLegacy)
           .eq("status", "removed")
           .order("updated_at", { ascending: false })
-          .limit(120);
+          .limit(80);
       }
       const activeRows = catQActive.error ? [] : catQActive.data || [];
       const removedRows = catQRemoved.error ? [] : catQRemoved.data || [];

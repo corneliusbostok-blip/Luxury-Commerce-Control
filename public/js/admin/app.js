@@ -1746,7 +1746,14 @@ function load() {
   return apiRequest("/api/admin/summary", { headers: adminHeaders({ json: false }), retries: 1 })
     .then((resp) => {
       if (resp.status === 401) {
+        flashAdminAuthBannerError("401: Udfyld X-Admin-Secret (samme som ADMIN_SECRET på Netlify).");
+        goToCatalogAndFocusSecret();
         renderFullSummary({ ok: false });
+        if (panelErr) {
+          panelErr.textContent =
+            "Mangler/forkert admin-kode. Udfyld X-Admin-Secret, ellers kan dashboard-data ikke vises.";
+          panelErr.style.display = "block";
+        }
         return resp.data;
       }
       const data = resp.data || { ok: false, error: resp.message || "Could not load summary." };
