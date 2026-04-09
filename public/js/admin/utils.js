@@ -12,7 +12,11 @@ export function esc(s) {
  * @param {{ json?: boolean }} [opts] — set json:false for DELETE/GET with no body (avoids useless Content-Type).
  */
 export function readAdminSecret() {
-  return "";
+  try {
+    return String(localStorage.getItem("velden_admin_secret") || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 /**

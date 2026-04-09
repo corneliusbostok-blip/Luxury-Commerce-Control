@@ -48,6 +48,9 @@
                 err.textContent = (x.j && x.j.error) || "Kunne ikke logge ind.";
                 return;
               }
+              try {
+                localStorage.setItem("velden_admin_secret", input.value.trim());
+              } catch (_) {}
               window.location.href = "/admin.html";
             })
             .catch(function () {

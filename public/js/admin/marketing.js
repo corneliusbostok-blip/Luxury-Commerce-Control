@@ -11,22 +11,56 @@
     n.classList.add(ok ? "ok" : "err");
   }
 
+  function apiFailureMessage(data, res) {
+    if (data && typeof data.message === "string" && data.message.trim()) return data.message.trim();
+    if (data && typeof data.error === "string" && data.error.trim()) return data.error.trim();
+    if (data && data.error && typeof data.error === "object" && data.error.code) {
+      return String(data.error.code);
+    }
+    if (res.status === 401) {
+      return "Ikke logget ind — åbn /admin-login.html og indtast samme kode som ADMIN_SECRET (Netlify miljøvariabel).";
+    }
+    return "Request failed";
+  }
+
+  function errMessage(e) {
+    if (e == null) return "ukendt fejl";
+    if (typeof e === "string") return e;
+    if (e instanceof Error && e.message) return e.message;
+    if (typeof e === "object" && e.message != null) return String(e.message);
+    try {
+      return JSON.stringify(e);
+    } catch (_) {
+      return String(e);
+    }
+  }
+
+  function readStoredAdminSecret() {
+    try {
+      return String(localStorage.getItem("velden_admin_secret") || "").trim();
+    } catch (_) {
+      return "";
+    }
+  }
+
   async function api(url, options) {
     var U = typeof window !== "undefined" ? window.VeldenUnauthorized : null;
-    const res = await fetch(url, Object.assign({ credentials: "include", cache: "no-store" }, options || {}));
+    var opts = Object.assign({ credentials: "include", cache: "no-store" }, options || {});
+    var headers = Object.assign({}, opts.headers || {});
+    var sec = readStoredAdminSecret();
+    if (sec) headers["X-Admin-Secret"] = sec;
+    opts.headers = headers;
+    const res = await fetch(url, opts);
     const data = await res.json().catch(function () {
       return null;
     });
     if (res.status === 401 && U) {
-      U.report((data && (data.message || data.error)) || "Unauthorized");
+      U.report(apiFailureMessage(data, res));
     } else if (res.ok && U) {
       U.noteResponseOk(true);
     }
     if (!res.ok || !data || data.ok === false) {
-      var errMsg =
-        (data && (data.error || data.message)) ||
-        (res.status === 401 ? "Unauthorized — tjek X-Admin-Secret." : "Request failed");
-      throw new Error(errMsg);
+      throw new Error(apiFailureMessage(data, res));
     }
     return data;
   }
@@ -292,7 +326,7 @@
       await loadPosts();
       setNotice("Post sendt til " + platform + ".", true);
     } catch (e) {
-      setNotice("Kunne ikke poste til " + platform + ": " + e.message, false);
+      setNotice("Kunne ikke poste til " + platform + ": " + errMessage(e), false);
     }
   }
 
@@ -305,7 +339,7 @@
   el("generate-test").addEventListener("click", testPost);
 
   Promise.all([loadStatus(), loadPosts(), loadPostProducts()]).catch(function (e) {
-    window.alert("Kunne ikke indlæse marketing side: " + e.message);
+    window.alert("Kunne ikke indlæse marketing side: " + errMessage(e));
   });
 
   (function handleOauthResult() {

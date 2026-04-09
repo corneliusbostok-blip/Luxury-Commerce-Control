@@ -14,12 +14,15 @@
   }
 
   function defaultMessage() {
-    return "Unauthorized. Admin session er udloeber/mangler. Udfyld X-Admin-Secret igen og genindlaes siden.";
+    return "Log ind igen: åbn /admin-login.html og indtast din admin-kode.";
   }
 
   global.VeldenUnauthorized = {
     report: function (message) {
       authExpired = true;
+      try {
+        localStorage.removeItem("velden_admin_secret");
+      } catch (_) {}
       var panelErr = resolveBannerEl();
       if (!panelErr) return;
       panelErr.textContent = (message && String(message).trim()) || defaultMessage();

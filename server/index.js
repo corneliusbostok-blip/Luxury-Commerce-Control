@@ -323,7 +323,12 @@ function getCookie(req, name) {
 
 function setAdminSecretCookie(res, secret) {
   const value = encodeURIComponent(String(secret || ""));
-  res.setHeader("Set-Cookie", `velden_admin_secret=${value}; Path=/; HttpOnly; SameSite=Lax`);
+  const useSecure =
+    String(process.env.NODE_ENV || "").toLowerCase() === "production" ||
+    String(process.env.NETLIFY || "").toLowerCase() === "true";
+  const parts = [`velden_admin_secret=${value}`, "Path=/", "HttpOnly", "SameSite=Lax"];
+  if (useSecure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
 }
 
 function requireAdmin(req, res, next) {
