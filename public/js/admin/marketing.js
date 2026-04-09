@@ -37,6 +37,8 @@
 
   function readStoredAdminSecret() {
     try {
+      var fromSession = String(sessionStorage.getItem("velden_admin_secret") || "").trim();
+      if (fromSession) return fromSession;
       return String(localStorage.getItem("velden_admin_secret") || "").trim();
     } catch (_) {
       return "";

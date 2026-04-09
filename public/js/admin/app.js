@@ -281,6 +281,7 @@ function wireRowActions(tbody) {
         load();
       } else if (x.status === 401) {
         try {
+          sessionStorage.removeItem("velden_admin_secret");
           localStorage.removeItem("velden_admin_secret");
         } catch {
           /* ignore */
@@ -1726,19 +1727,6 @@ function load() {
   return apiRequest("/api/admin/summary", { headers: adminHeaders({ json: false }), retries: 1 })
     .then((resp) => {
       if (resp.status === 401) {
-        if (panelErr) {
-          panelErr.textContent = "";
-          const s = document.createElement("strong");
-          s.textContent = "Ikke logget ind. ";
-          panelErr.appendChild(s);
-          const a = document.createElement("a");
-          a.href = "/admin-login.html";
-          a.textContent = "Åbn login";
-          panelErr.appendChild(a);
-          const tail = document.createTextNode(" med samme kode som ADMIN_SECRET (Netlify).");
-          panelErr.appendChild(tail);
-          panelErr.style.display = "block";
-        }
         renderFullSummary({ ok: false });
         return resp.data;
       }

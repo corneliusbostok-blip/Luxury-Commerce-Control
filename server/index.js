@@ -331,6 +331,15 @@ function setAdminSecretCookie(res, secret) {
   res.setHeader("Set-Cookie", parts.join("; "));
 }
 
+function clearAdminSecretCookie(res) {
+  const useSecure =
+    String(process.env.NODE_ENV || "").toLowerCase() === "production" ||
+    String(process.env.NETLIFY || "").toLowerCase() === "true";
+  const parts = ["velden_admin_secret=", "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
+  if (useSecure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
 function requireAdmin(req, res, next) {
   const expected = normalizeAdminSecretValue(process.env.ADMIN_SECRET);
   if (!expected) return next();
@@ -911,8 +920,13 @@ app.post("/api/admin/login", loginLimiter, validateBody(schemas.adminLogin), (re
   return res.json({ ok: true, unlocked: true });
 });
 
+app.post("/api/admin/logout", (_req, res) => {
+  clearAdminSecretCookie(res);
+  return res.json({ ok: true, loggedOut: true });
+});
+
 app.use("/api/admin", (req, res, next) => {
-  if (req.path === "/login") return next();
+  if (req.path === "/login" || req.path === "/logout") return next();
   return requireAdmin(req, res, next);
 });
 

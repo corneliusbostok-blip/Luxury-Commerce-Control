@@ -49,9 +49,14 @@
                 return;
               }
               try {
-                localStorage.setItem("velden_admin_secret", input.value.trim());
+                var secret = input.value.trim();
+                sessionStorage.setItem("velden_admin_secret", secret);
+                localStorage.removeItem("velden_admin_secret");
               } catch (_) {}
-              window.location.href = "/admin.html";
+              var next = new URLSearchParams(location.search).get("next");
+              var dest =
+                next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/admin.html";
+              window.location.href = dest;
             })
             .catch(function () {
               err.textContent = "Netværksfejl. Prøv igen.";

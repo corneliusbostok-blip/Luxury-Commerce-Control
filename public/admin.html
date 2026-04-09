@@ -15,6 +15,25 @@
     <link rel="stylesheet" href="/css/admin-dashboard.css?v=21" />
   </head>
   <body class="adm-body">
+    <script>
+      (function () {
+        var h = location.hostname;
+        if (h === "localhost" || h === "127.0.0.1") return;
+        try {
+          if (location.search.indexOf("skipLogin=1") >= 0) return;
+          var hasSession = !!sessionStorage.getItem("velden_admin_secret");
+          if (!hasSession && localStorage.getItem("velden_admin_secret")) {
+            sessionStorage.setItem("velden_admin_secret", localStorage.getItem("velden_admin_secret"));
+            localStorage.removeItem("velden_admin_secret");
+            hasSession = true;
+          }
+          if (!hasSession)
+            location.replace(
+              "/admin-login.html?next=" + encodeURIComponent(location.pathname + location.search + location.hash)
+            );
+        } catch (_) {}
+      })();
+    </script>
     <header class="adm-topbar">
       <div class="adm-topbar-inner">
         <div class="adm-brand adm-brand--logo">
@@ -24,7 +43,7 @@
         </div>
         <div class="adm-top-actions adm-top-actions--with-secret">
           <button type="button" class="adm-btn-ghost" data-admin-scroll-top>Top</button>
-          <a class="adm-btn-ghost adm-btn-primary" href="/shop.html">Webshop</a>
+          <a class="adm-btn-ghost adm-btn-primary" href="/shop.html" data-admin-exit>Webshop</a>
         </div>
       </div>
       <div class="adm-tabs-wrap">
@@ -802,9 +821,30 @@
       <span class="adm-ai-face__tooltip" id="ai-face-tooltip">AI — klik for at chatte</span>
     </button>
 
-    <script src="/js/admin/unauthorized-banner.js"></script>
+    <script>
+      (function () {
+        function clearClientAdminSecret() {
+          try {
+            sessionStorage.removeItem("velden_admin_secret");
+            localStorage.removeItem("velden_admin_secret");
+          } catch (_) {}
+        }
+        function notifyServerLogout() {
+          try {
+            fetch("/api/admin/logout", { method: "POST", credentials: "include", keepalive: true });
+          } catch (_) {}
+        }
+        document.querySelectorAll("[data-admin-exit]").forEach(function (a) {
+          a.addEventListener("click", function () {
+            clearClientAdminSecret();
+            notifyServerLogout();
+          });
+        });
+      })();
+    </script>
+    <script src="/js/admin/unauthorized-banner.js?v=2"></script>
     <script src="/js/common/api-client.js?v=2"></script>
-    <script type="module" src="/js/admin/app.js?v=36"></script>
+    <script type="module" src="/js/admin/app.js?v=38"></script>
     <script src="/js/admin/marketing.js?v=3"></script>
   </body>
 </html>

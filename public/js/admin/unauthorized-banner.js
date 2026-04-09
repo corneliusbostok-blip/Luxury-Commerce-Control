@@ -17,15 +17,32 @@
     return "Log ind igen: åbn /admin-login.html og indtast din admin-kode.";
   }
 
+  /** Serverens standard-401-tekst — vis dansk + link i stedet for lang engelsk sætning. */
+  function fillUnauthorizedBanner(panelErr, rawMessage) {
+    var s = String(rawMessage || "").trim();
+    if (/Unauthorized\. Send X-Admin-Secret/i.test(s)) {
+      panelErr.textContent = "";
+      var strong = document.createElement("strong");
+      strong.textContent = "Du er ikke logget ind (eller forkert kode). ";
+      panelErr.appendChild(strong);
+      var a = document.createElement("a");
+      a.href = "/admin-login.html?next=" + encodeURIComponent(location.pathname + location.search + location.hash);
+      a.textContent = "Gå til login";
+      panelErr.appendChild(a);
+      panelErr.appendChild(
+        document.createTextNode(" — brug præcis samme kode som ADMIN_SECRET i Netlify.")
+      );
+      return;
+    }
+    panelErr.textContent = s || defaultMessage();
+  }
+
   global.VeldenUnauthorized = {
     report: function (message) {
       authExpired = true;
-      try {
-        localStorage.removeItem("velden_admin_secret");
-      } catch (_) {}
       var panelErr = resolveBannerEl();
       if (!panelErr) return;
-      panelErr.textContent = (message && String(message).trim()) || defaultMessage();
+      fillUnauthorizedBanner(panelErr, message);
       panelErr.style.display = "block";
     },
 
