@@ -95,6 +95,54 @@
             .toLowerCase()
             .replace(/\s+/g, " ");
         }
+        function isValidDisplayImageUrl(url) {
+          var u = String(url || "").trim();
+          if (!u) return false;
+          if (!/^https?:\/\//i.test(u) && u.charAt(0) !== "/") return false;
+          var l = u.toLowerCase();
+          if (
+            l.indexOf("placeholder") >= 0 ||
+            l.indexOf("thumbnail") >= 0 ||
+            l.indexOf("logo") >= 0 ||
+            l.indexOf("icon") >= 0
+          ) {
+            return false;
+          }
+          return true;
+        }
+        function improveImageUrlQuality(url) {
+          var u = String(url || "").trim();
+          if (!u) return "";
+          u = u.replace(/([?&])width=\d+/gi, "$1width=1000");
+          u = u.replace(/([?&])w=\d+/gi, "$1w=1000");
+          u = u.replace(/([?&])size=small\b/gi, "$1size=large");
+          u = u.replace(/\/s-l\d{2,4}\.(jpg|jpeg|png|webp)(\?|$)/i, "/s-l1600.$1$2");
+          return u;
+        }
+        function uniqueValidImageUrls(list) {
+          var out = [];
+          var seen = {};
+          (Array.isArray(list) ? list : []).forEach(function (u) {
+            var x = improveImageUrlQuality(String(u || "").trim());
+            if (!isValidDisplayImageUrl(x)) return;
+            if (seen[x]) return;
+            seen[x] = 1;
+            out.push(x);
+          });
+          return out;
+        }
+        function parseMaybeArray(v) {
+          if (Array.isArray(v)) return v;
+          if (typeof v === "string") {
+            try {
+              var j = JSON.parse(v);
+              return Array.isArray(j) ? j : [];
+            } catch (_) {
+              return [];
+            }
+          }
+          return [];
+        }
 
         if (!id) {
           root.innerHTML = '<p class="message message--error">Produktet findes ikke.</p>';
@@ -143,19 +191,12 @@
                   ];
             var selectedVi = 0;
 
-            var galleryUrls = [];
-            var seenU = {};
-            (Array.isArray(p.images) ? p.images : []).forEach(function (u) {
-              var x = String(u || "").trim();
-              if (x && !seenU[x]) {
-                seenU[x] = 1;
-                galleryUrls.push(x);
-              }
-            });
-            if (!galleryUrls.length) {
-              var primary = (colorVariants[0] && colorVariants[0].image_url) || p.image_url || "";
-              if (primary) galleryUrls.push(primary);
-            }
+            var galleryUrls = uniqueValidImageUrls(
+              (Array.isArray(p.images) ? p.images : [])
+                .concat(parseMaybeArray(p.image_urls))
+                .concat(colorVariants.map(function (v) { return v && v.image_url; }))
+                .concat([p.image_url])
+            );
 
             var sizes = p.sizeOptions && p.sizeOptions.length ? p.sizeOptions : ["One size"];
             var selectedSize = sizes[0];
@@ -295,32 +336,10 @@
               return '<div class="pd-stock pd-stock--ok" id="pd-stock" role="status">' + esc(hint) + "</div>";
             }
 
-            var thumbsHtml = "";
-            if (galleryUrls.length > 1) {
-              thumbsHtml =
-                '<div class="pd__thumbs" id="pd-thumbs" aria-label="Produktbilleder">' +
-                galleryUrls
-                  .map(function (u, i) {
-                    return (
-                      '<button type="button" class="pd__thumb' +
-                      (i === 0 ? " is-active" : "") +
-                      '" data-gi="' +
-                      i +
-                      '" aria-label="Billede ' +
-                      (i + 1) +
-                      ' af ' +
-                      galleryUrls.length +
-                      '"><img src="' +
-                      esc(u) +
-                      '" alt="" loading="lazy" decoding="async" /></button>'
-                    );
-                  })
-                  .join("") +
-                "</div>";
-            }
+            var thumbsHtml = '<div class="pd__thumbs" id="pd-thumbs" aria-label="Produktbilleder"></div>';
 
             var v0 = colorVariants[0] || {};
-            var mainSrc = v0.image_url || p.image_url || galleryUrls[0] || "";
+            var mainSrc = isValidDisplayImageUrl(v0.image_url) ? v0.image_url : galleryUrls[0] || "";
 
             var ul =
               points.length > 0
@@ -367,6 +386,117 @@
               "</div></article>";
 
             var selectedGalleryIdx = 0;
+            function renderThumbs() {
+              var host = document.getElementById("pd-thumbs");
+              if (!host) return;
+              if (galleryUrls.length <= 1) {
+                host.style.display = "none";
+                host.innerHTML = "";
+                return;
+              }
+              host.style.display = "";
+              host.innerHTML = galleryUrls
+                .map(function (u, i) {
+                  return (
+                    '<button type="button" class="pd__thumb' +
+                    (i === selectedGalleryIdx ? " is-active" : "") +
+                    '" data-gi="' +
+                    i +
+                    '" aria-label="Billede ' +
+                    (i + 1) +
+                    ' af ' +
+                    galleryUrls.length +
+                    '"><img src="' +
+                    esc(u) +
+                    '" alt="" loading="lazy" decoding="async" /></button>'
+                  );
+                })
+                .join("");
+              host.querySelectorAll(".pd__thumb").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                  var idx = parseInt(btn.getAttribute("data-gi"), 10) || 0;
+                  setActiveThumb(idx);
+                  var img = document.getElementById("pd-img");
+                  if (img && galleryUrls[idx]) img.src = galleryUrls[idx];
+                });
+                var tImg = btn.querySelector("img");
+                if (tImg) {
+                  tImg.onerror = function () {
+                    btn.style.display = "none";
+                  };
+                }
+              });
+            }
+            function hydrateGalleryWithLoadableImages() {
+              if (!galleryUrls.length) return;
+              var candidates = galleryUrls.slice(0);
+              var ok = [];
+              var i = 0;
+              function next() {
+                if (i >= candidates.length) {
+                  if (ok.length) {
+                    galleryUrls = ok;
+                    selectedGalleryIdx = 0;
+                    renderThumbs();
+                    var img = document.getElementById("pd-img");
+                    if (img) img.src = galleryUrls[0];
+                  }
+                  return;
+                }
+                var u = candidates[i++];
+                var probe = new Image();
+                var done = false;
+                var timer = setTimeout(function () {
+                  if (done) return;
+                  done = true;
+                  next();
+                }, 4500);
+                probe.onload = function () {
+                  if (done) return;
+                  done = true;
+                  clearTimeout(timer);
+                  if (Number(probe.naturalWidth || 0) >= 350) ok.push(u);
+                  next();
+                };
+                probe.onerror = function () {
+                  if (done) return;
+                  done = true;
+                  clearTimeout(timer);
+                  next();
+                };
+                probe.src = u;
+              }
+              next();
+            }
+            function bindMainImageFallback() {
+              var img = document.getElementById("pd-img");
+              if (!img) return;
+              function loadBestFrom(start) {
+                if (!galleryUrls.length) {
+                  img.removeAttribute("src");
+                  return;
+                }
+                var i = Math.max(0, start || 0);
+                if (i >= galleryUrls.length) {
+                  img.removeAttribute("src");
+                  return;
+                }
+                selectedGalleryIdx = i;
+                setActiveThumb(i);
+                img.src = galleryUrls[i];
+              }
+              img.onerror = function () {
+                loadBestFrom(selectedGalleryIdx + 1);
+              };
+              img.onload = function () {
+                if (Number(img.naturalWidth || 0) > 0 && Number(img.naturalWidth || 0) < 500) {
+                  loadBestFrom(selectedGalleryIdx + 1);
+                }
+              };
+              if (galleryUrls.length) {
+                loadBestFrom(selectedGalleryIdx);
+              }
+            }
 
             function setActiveThumb(idx) {
               selectedGalleryIdx = Math.max(0, Math.min(galleryUrls.length - 1, idx));
@@ -381,7 +511,7 @@
               var v = colorVariants[selectedVi];
               var img = document.getElementById("pd-img");
               var pr = document.getElementById("pd-price");
-              var cand = (v && v.image_url) || p.image_url || "";
+              var cand = isValidDisplayImageUrl(v && v.image_url) ? v.image_url : "";
               var gi = cand ? galleryUrls.indexOf(cand) : -1;
               if (gi >= 0) {
                 selectedGalleryIdx = gi;
@@ -430,14 +560,7 @@
               }
             }
 
-            root.querySelectorAll(".pd__thumb").forEach(function (btn) {
-              btn.addEventListener("click", function () {
-                var idx = parseInt(btn.getAttribute("data-gi"), 10) || 0;
-                setActiveThumb(idx);
-                var img = document.getElementById("pd-img");
-                if (img && galleryUrls[idx]) img.src = galleryUrls[idx];
-              });
-            });
+            renderThumbs();
 
             var colorBtns = root.querySelectorAll(".color-opt");
             colorBtns.forEach(function (btn) {
@@ -460,6 +583,8 @@
             });
 
             refreshSizeUi();
+            bindMainImageFallback();
+            hydrateGalleryWithLoadableImages();
 
             document.getElementById("add-cart").addEventListener("click", function () {
               var btn = document.getElementById("add-cart");

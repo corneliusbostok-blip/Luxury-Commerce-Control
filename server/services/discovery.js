@@ -24,6 +24,11 @@ const { normalizeDiscoveredPriceToDkk } = require("./currency");
 const { titleFailsVeldenBrief } = require("./sourcing");
 const { normalizeImages, normalizeVariants } = require("./product-sync-normalizer");
 const {
+  chooseBestProductImage,
+  extractImageCandidatesFromDocument,
+  improveImageUrlQuality,
+} = require("./image-quality");
+const {
   queryPerformanceMap,
   categoryPerformanceMap,
   computeDiscoveryScore,
@@ -407,14 +412,20 @@ function countryFromBrand(brand) {
   return "";
 }
 
-function productRowFromJsonLd(obj, pageUrl, seedUrl, siteNameMeta) {
+function productRowFromJsonLd(obj, pageUrl, seedUrl, siteNameMeta, pageImageCandidates = []) {
   const title = String(obj.name || obj.title || "").trim();
   if (!title) return null;
   const sourceUrl = productUrl(obj, pageUrl);
   const { price: rawPrice, currency: offerCurrency } = offersPriceAndCurrency(obj.offers);
   const price = normalizeDiscoveredPriceToDkk(rawPrice, offerCurrency, sourceUrl);
   const rawImages = allImages(obj.image).map((u) => absolutize(u, sourceUrl) || u);
-  const normalizedImages = normalizeImages(rawImages, absolutize(firstImage(obj.image), sourceUrl) || firstImage(obj.image));
+  const primaryJsonLd = absolutize(firstImage(obj.image), sourceUrl) || firstImage(obj.image);
+  const bestImage = chooseBestProductImage([
+    ...rawImages,
+    primaryJsonLd,
+    ...pageImageCandidates,
+  ]);
+  const normalizedImages = normalizeImages([bestImage.image, ...bestImage.accepted.map((x) => x.url)], bestImage.image);
   const image = normalizedImages[0] || "";
   const brand = brandString(obj.brand);
   const supplierCountry =
@@ -455,6 +466,7 @@ function productRowFromJsonLd(obj, pageUrl, seedUrl, siteNameMeta) {
     images: normalizedImages,
     variants,
     available: variants.some((v) => v.available !== false),
+    image_rejected_candidates: bestImage.rejected,
   };
 }
 
@@ -523,11 +535,14 @@ function extractOgTitle(html) {
 function productRowFromOpenGraph(html, pageUrl, seedUrl) {
   const title = extractOgTitle(html);
   if (!title) return null;
+  const $ = cheerio.load(html);
+  const docImages = extractImageCandidatesFromDocument($, pageUrl);
   const image = extractOgImage(html, pageUrl);
-  const images = normalizeImages([image], image);
+  const bestImage = chooseBestProductImage([image, ...docImages]);
+  const images = normalizeImages([bestImage.image, ...bestImage.accepted.map((x) => x.url)], bestImage.image);
   const { price: rawP, currency: ogCur } = extractOgPriceAndCurrency(html);
   const price = normalizeDiscoveredPriceToDkk(rawP, ogCur, pageUrl);
-  if (price <= 0 || !String(image || "").trim()) return null;
+  if (price <= 0 || !String(bestImage.image || "").trim()) return null;
   const siteNameMeta = extractOgSiteName(html);
   const platform = hostLabel(seedUrl || pageUrl);
   const sourceName = (siteNameMeta || platform).trim();
@@ -538,7 +553,7 @@ function productRowFromOpenGraph(html, pageUrl, seedUrl) {
   return {
     title,
     price,
-    image: images[0] || image,
+    image: images[0] || bestImage.image,
     externalId: stableIdFromUrl(pageUrl),
     category: inferCategory(title),
     color: inferProductColor(title),
@@ -555,6 +570,7 @@ function productRowFromOpenGraph(html, pageUrl, seedUrl) {
     images,
     variants,
     available: true,
+    image_rejected_candidates: bestImage.rejected,
   };
 }
 
@@ -591,12 +607,14 @@ function collectFromPage(html, pageUrl, seedUrl, storeConfig = null) {
   const products = [];
   const linkCandidates = [];
   const siteNameMeta = extractOgSiteName(html);
+  const $ = cheerio.load(html);
+  const pageImageCandidates = extractImageCandidatesFromDocument($, pageUrl);
   const blocks = parseJsonLdBlocks(html);
   for (const block of blocks) {
     const found = [];
     walkCollectProducts(block, found);
     for (const p of found) {
-      const row = productRowFromJsonLd(p, pageUrl, seedUrl, siteNameMeta);
+      const row = productRowFromJsonLd(p, pageUrl, seedUrl, siteNameMeta, pageImageCandidates);
       if (row) {
         if (titleFailsVeldenBrief(row.title, storeConfig)) {
           console.log("DISCOVERY REJECT:", {
@@ -607,8 +625,19 @@ function collectFromPage(html, pageUrl, seedUrl, storeConfig = null) {
           continue;
         }
         if (!row.image) {
-          const og = extractOgImage(html, pageUrl);
-          if (og) row.image = og;
+          const picked = chooseBestProductImage([extractOgImage(html, pageUrl), ...pageImageCandidates]);
+          if (picked.image) {
+            row.image = picked.image;
+            row.images = normalizeImages([picked.image, ...(row.images || [])], picked.image);
+          }
+        }
+        if (!row.image) {
+          console.log("DISCOVERY IMAGE REJECT:", {
+            reason: "no_valid_image",
+            sourceUrl: String(row.sourceUrl || pageUrl || ""),
+            rejected: Array.isArray(row.image_rejected_candidates) ? row.image_rejected_candidates.slice(0, 8) : [],
+          });
+          continue;
         }
         if (row.price <= 0) {
           const og = extractOgPriceAndCurrency(html);
@@ -903,7 +932,17 @@ async function discoverProductsDetailed(desiredCount = 6, options = {}) {
         for (const row of products) {
           const k = row.sourceUrl || row.externalId;
           if (!k || seenKeys.has(k)) continue;
-          if (row.price <= 0 || !String(row.image || "").trim()) continue;
+          if (row.price <= 0 || !String(row.image || "").trim()) {
+            if (!String(row.image || "").trim()) {
+              console.log("DISCOVERY SKIP PRODUCT:", {
+                reason: "missing_image",
+                title: String(row.title || "").slice(0, 140),
+                sourceUrl: String(row.sourceUrl || pageUrl || ""),
+              });
+            }
+            continue;
+          }
+          row.image = improveImageUrlQuality(row.image);
           seenKeys.add(k);
           collected.push(row);
           providerBreakdown.web += 1;

@@ -166,6 +166,10 @@ const schemas = {
     platform: z.enum(["facebook", "instagram", "tiktok"]),
     productId: z.string().uuid().optional(),
   }),
+  adminMarketingBackfillConnections: z.object({
+    dryRun: z.boolean().optional(),
+    clearLegacyTokens: z.boolean().optional(),
+  }),
 };
 
 module.exports = {

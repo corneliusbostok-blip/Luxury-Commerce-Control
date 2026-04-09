@@ -2,6 +2,7 @@ const { normalizeDiscoveredPriceToDkk } = require("../../currency");
 const { inferCategory, inferProductColor } = require("../../category");
 const { FixedWindowRateLimiter } = require("./rate-limiter");
 const { normalizeImages, normalizeVariants } = require("../../product-sync-normalizer");
+const { chooseBestProductImage, improveImageUrlQuality } = require("../../image-quality");
 
 const limiter = new FixedWindowRateLimiter({
   maxRequests: Number(process.env.ALIEXPRESS_API_RATE_LIMIT_PER_SEC) || 3,
@@ -48,9 +49,20 @@ async function fetchAliExpressProductCandidates(limit, options = {}) {
     const image = String(it.image || it.productImage || it.imageUrl || "").trim();
     const url = String(it.itemUrl || it.productUrl || "").trim();
     const pRaw = Number(it.sku?.def?.promotionPrice || it.price || 0);
-    if (!title || !image || !url || !pRaw) continue;
+    if (!title || !url || !pRaw) continue;
     const price = normalizeDiscoveredPriceToDkk(pRaw, "USD", url);
-    const images = normalizeImages([image, it.imageUrl, it.productImage], image);
+    const selected = chooseBestProductImage([image, it.imageUrl, it.productImage]);
+    if (!selected.image) {
+      console.log("[discovery:image] reject", {
+        provider: "aliexpress",
+        reason: "no_valid_image",
+        title: title.slice(0, 140),
+        sourceUrl: url,
+        rejected: selected.rejected.slice(0, 6),
+      });
+      continue;
+    }
+    const images = normalizeImages([selected.image, ...selected.accepted.map((x) => x.url)], selected.image);
     const variants = normalizeVariants(
       [{ size: null, color: inferProductColor(title), price, available: true }],
       { size: "unknown", color: inferProductColor(title), price, available: true }
@@ -58,7 +70,7 @@ async function fetchAliExpressProductCandidates(limit, options = {}) {
     out.push({
       title,
       price,
-      image: images[0] || image,
+      image: improveImageUrlQuality(images[0] || selected.image),
       externalId: `aliexpress:${String(it.itemId || it.productId || url).slice(0, 180)}`,
       category: inferCategory(title),
       color: inferProductColor(title),

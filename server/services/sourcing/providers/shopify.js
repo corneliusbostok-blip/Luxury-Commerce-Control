@@ -14,6 +14,7 @@ const {
   shopifyProductToDiscoveryCandidate,
   extractMyshopifyHost,
 } = require("../../shopify-import");
+const { chooseBestProductImage, improveImageUrlQuality } = require("../../image-quality");
 
 function providerListAllowsShopify(storeConfig) {
   const es = storeConfig && storeConfig.enabledSources;
@@ -124,6 +125,20 @@ async function fetchShopifyProductCandidates(limit, options = {}) {
   const out = [];
   for (const prod of products) {
     const row = shopifyProductToDiscoveryCandidate(prod, origin, importMethod);
+    const selectedImage = chooseBestProductImage([row.image, ...(Array.isArray(row.images) ? row.images : [])]);
+    if (selectedImage.image) {
+      row.image = improveImageUrlQuality(selectedImage.image);
+      row.images = [row.image, ...selectedImage.accepted.map((x) => x.url)].filter(Boolean).slice(0, 20);
+    }
+    if (!selectedImage.image) {
+      console.log("[discovery:image] reject", {
+        provider: "shopify",
+        reason: "no_valid_image",
+        title: String(row.title || "").slice(0, 140),
+        sourceUrl: String(row.sourceUrl || ""),
+        rejected: selectedImage.rejected.slice(0, 6),
+      });
+    }
     if (!row.title || row.price <= 0 || !String(row.image || "").trim()) continue;
     out.push({
       ...row,

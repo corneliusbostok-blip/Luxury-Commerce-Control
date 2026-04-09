@@ -11,6 +11,7 @@ const {
 } = require("../../ebay-api");
 const { buildEbayQueries } = require("../query-engine");
 const { normalizeImages, normalizeVariants } = require("../../product-sync-normalizer");
+const { chooseBestProductImage, improveImageUrlQuality } = require("../../image-quality");
 
 const AUTOMOTIVE_OFFTOPIC = [
   "car",
@@ -215,14 +216,12 @@ function ebayItemToDiscoveryCandidate(item, marketplaceId, sourceQuery = "", sel
   else if (item.thumbnailImages && item.thumbnailImages[0] && item.thumbnailImages[0].imageUrl) {
     img = String(item.thumbnailImages[0].imageUrl);
   }
-  const imageList = normalizeImages(
-    [
-      img,
-      ...(Array.isArray(item.additionalImages) ? item.additionalImages.map((x) => x && x.imageUrl).filter(Boolean) : []),
-      ...(Array.isArray(item.thumbnailImages) ? item.thumbnailImages.map((x) => x && x.imageUrl).filter(Boolean) : []),
-    ],
-    img
-  );
+  const selected = chooseBestProductImage([
+    img,
+    ...(Array.isArray(item.additionalImages) ? item.additionalImages.map((x) => x && x.imageUrl).filter(Boolean) : []),
+    ...(Array.isArray(item.thumbnailImages) ? item.thumbnailImages.map((x) => x && x.imageUrl).filter(Boolean) : []),
+  ]);
+  const imageList = normalizeImages([selected.image, ...selected.accepted.map((x) => x.url)], selected.image);
   const priceObj = item.price || {};
   const rawVal = parseFloat(String(priceObj.value || "0")) || 0;
   const curr = String(priceObj.currency || "USD");
@@ -268,7 +267,7 @@ function ebayItemToDiscoveryCandidate(item, marketplaceId, sourceQuery = "", sel
   return {
     title,
     price,
-    image: imageList[0] || img,
+    image: improveImageUrlQuality(imageList[0] || selected.image || img),
     externalId: extId,
     category: normalizeCategoryId(inferCategory(title)),
     color: inferProductColor(title),
@@ -344,7 +343,17 @@ async function fetchEbayProductCandidates(limit, options = {}) {
           picked.selectionMode || "unknown",
           picked.confidence || "low"
         );
-        if (!row.title || row.price <= 0 || !String(row.image || "").trim()) continue;
+        if (!row.title || row.price <= 0 || !String(row.image || "").trim()) {
+          if (!String(row.image || "").trim()) {
+            console.log("[discovery:image] reject", {
+              provider: "ebay",
+              reason: "no_valid_image",
+              title: String(row.title || "").slice(0, 140),
+              sourceUrl: String(row.sourceUrl || ""),
+            });
+          }
+          continue;
+        }
         if (blockedByNegativeTitleTerms(row.title, picked.negative || [])) {
           rejectedNegative += 1;
           continue;

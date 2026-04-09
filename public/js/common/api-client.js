@@ -14,7 +14,7 @@
 
     while (attempt <= retries) {
       try {
-        var merged = Object.assign({ credentials: "include" }, opts || {});
+        var merged = Object.assign({ credentials: "include", cache: "no-store" }, opts || {});
         var res = await fetch(url, merged);
         var text = await res.text();
         var json = null;

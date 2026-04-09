@@ -12,6 +12,7 @@ const {
   PublishGuardRpcError,
 } = require("./publish-guard");
 const { resolvePublicUrl } = require("../../lib/public-url");
+const { listConnections, upsertConnection, markConnectionDisconnected } = require("./connection-store");
 
 function publicBaseUrl() {
   return resolvePublicUrl();
@@ -77,6 +78,8 @@ function normalizeMarketingConfig(cfg = {}) {
   }
   return {
     enabled: src.enabled === true,
+    connectionSource: String(src.connectionSource || ""),
+    backfill: src.backfill && typeof src.backfill === "object" ? { ...src.backfill } : {},
     settings: {
       postOnNewProduct: src.settings ? src.settings.postOnNewProduct !== false : true,
       postOnPriceDrop: src.settings ? src.settings.postOnPriceDrop === true : false,
@@ -89,9 +92,119 @@ function normalizeMarketingConfig(cfg = {}) {
   };
 }
 
-async function getMarketingStatus(supabase) {
+async function applyConnectionOverlay(supabase, marketingConfig) {
+  const m = marketingConfig && typeof marketingConfig === "object" ? { ...marketingConfig } : normalizeMarketingConfig({});
+  m.platforms = { ...(m.platforms || {}) };
+  const dbOnlyMode = String(m.connectionSource || "").toLowerCase() === "marketing_connections";
+  if (dbOnlyMode) {
+    for (const p of ["facebook", "instagram", "tiktok"]) {
+      const prev = m.platforms[p] && typeof m.platforms[p] === "object" ? m.platforms[p] : {};
+      m.platforms[p] = {
+        ...prev,
+        token: "",
+        token_enc: "",
+        connected: false,
+      };
+    }
+  }
+  const rows = await listConnections(supabase, "active");
+  for (const row of rows || []) {
+    const p = String(row.platform || "").toLowerCase();
+    if (!["facebook", "instagram", "tiktok"].includes(p)) continue;
+    const prev = m.platforms[p] && typeof m.platforms[p] === "object" ? m.platforms[p] : {};
+    const token = String(row.access_token || "").trim();
+    m.platforms[p] = {
+      ...prev,
+      token,
+      token_enc: String(row.access_token_enc || ""),
+      refresh_token_enc: String(row.refresh_token_enc || ""),
+      pageId: String(row.page_id || prev.pageId || ""),
+      igUserId: String(row.ig_user_id || prev.igUserId || ""),
+      accountId: String(row.account_id || prev.accountId || ""),
+      enabled: row.enabled !== false,
+      connected: Boolean(token || row.access_token_enc),
+      authMethod: String(row.auth_method || prev.authMethod || ""),
+      connectedAt: row.connected_at ? String(row.connected_at) : String(prev.connectedAt || ""),
+    };
+  }
+  return m;
+}
+
+async function backfillMarketingConnectionsFromStoreConfig(supabase, options = {}) {
+  if (!supabase) return { ok: false, error: "no_db" };
+  const dryRun = Boolean(options.dryRun);
+  const clearLegacyTokens = options.clearLegacyTokens !== false;
   const cfg = await getStoreConfig(supabase);
   const m = normalizeMarketingConfig(cfg);
+  const result = {
+    ok: true,
+    dryRun,
+    clearLegacyTokens,
+    migrated: 0,
+    skipped: 0,
+    skippedPlatforms: [],
+    migratedPlatforms: [],
+  };
+
+  const platformsPatch = {};
+  const nowIso = new Date().toISOString();
+  for (const platform of ["facebook", "instagram", "tiktok"]) {
+    const row = m.platforms && m.platforms[platform] ? m.platforms[platform] : {};
+    const token = String(row.token || "").trim();
+    if (!token) {
+      result.skipped += 1;
+      result.skippedPlatforms.push(platform);
+      continue;
+    }
+    if (!dryRun) {
+      await upsertConnection(supabase, {
+        store_id: "active",
+        platform,
+        access_token: token,
+        refresh_token: "",
+        expires_at: null,
+        account_id: String(row.accountId || ""),
+        page_id: String(row.pageId || ""),
+        ig_user_id: String(row.igUserId || ""),
+        enabled: row.enabled !== false,
+        auth_method: String(row.authMethod || "legacy_backfill"),
+        connected_at: String(row.connectedAt || nowIso),
+      });
+    }
+    result.migrated += 1;
+    result.migratedPlatforms.push(platform);
+    console.log("[marketing] backfill migrated platform", {
+      platform,
+      hasPageId: Boolean(String(row.pageId || "").trim()),
+      hasIgUserId: Boolean(String(row.igUserId || "").trim()),
+      hasAccountId: Boolean(String(row.accountId || "").trim()),
+    });
+    if (clearLegacyTokens) {
+      platformsPatch[platform] = {
+        ...row,
+        token: "",
+        token_enc: "",
+        connected: true,
+      };
+    }
+  }
+
+  if (!dryRun && clearLegacyTokens) {
+    await setMarketingConfig(supabase, {
+      platforms: platformsPatch,
+      connectionSource: "marketing_connections",
+      backfill: {
+        ranAt: nowIso,
+        migratedPlatforms: result.migratedPlatforms.slice(0, 3),
+      },
+    });
+  }
+  return result;
+}
+
+async function getMarketingStatus(supabase) {
+  const cfg = await getStoreConfig(supabase);
+  const m = await applyConnectionOverlay(supabase, normalizeMarketingConfig(cfg));
   const providers = defaultMarketingProviders().map((p) => {
     const platform = p.platform();
     const row = (m.platforms && m.platforms[platform]) || {};
@@ -103,7 +216,7 @@ async function getMarketingStatus(supabase) {
       connectedAt: row.connectedAt || "",
     };
   });
-  return { enabled: m.enabled, settings: m.settings, platforms: providers };
+  return { enabled: m.enabled, settings: m.settings, platforms: providers, connectionSource: m.connectionSource || "" };
 }
 
 async function setMarketingConfig(supabase, patch) {
@@ -163,6 +276,19 @@ async function connectPlatform(supabase, platform, token, extra = {}) {
       [p]: patch,
     },
   });
+  await upsertConnection(supabase, {
+    store_id: "active",
+    platform: p,
+    access_token: t,
+    refresh_token: String(extra.refreshToken || ""),
+    expires_at: extra.expiresAt || null,
+    account_id: String(extra.accountId || ""),
+    page_id: String(extra.pageId || ""),
+    ig_user_id: String(extra.igUserId || ""),
+    enabled: true,
+    auth_method: String(extra.authMethod || "manual"),
+    connected_at: String(extra.connectedAt || new Date().toISOString()),
+  });
   return { ok: true, marketing: withMeta };
 }
 
@@ -184,6 +310,7 @@ async function disconnectPlatform(supabase, platform) {
       },
     },
   });
+  await markConnectionDisconnected(supabase, p, "active");
   return { ok: true, marketing: next };
 }
 
@@ -213,7 +340,7 @@ async function updateMarketingOauthMeta(supabase, patchMeta = {}) {
 
 async function testPost(supabase, input = {}) {
   const cfg = await getStoreConfig(supabase);
-  const m = normalizeMarketingConfig(cfg);
+  const m = await applyConnectionOverlay(supabase, normalizeMarketingConfig(cfg));
   const platform = String(input.platform || "facebook").toLowerCase();
   const provider = providerByPlatform(platform);
   if (!provider) return { ok: false, error: "Unsupported platform" };
@@ -299,7 +426,7 @@ async function postNowForPlatform(supabase, input = {}) {
     return { ok: false, error: "Unsupported platform" };
   }
   const cfg = await getStoreConfig(supabase);
-  const m = normalizeMarketingConfig(cfg);
+  const m = await applyConnectionOverlay(supabase, normalizeMarketingConfig(cfg));
   const pf = m.platforms[platform];
   if (!pf || !pf.connected) return { ok: false, error: "Platform not connected" };
   if (pf.enabled === false) return { ok: false, error: "Platform is disabled" };
@@ -583,7 +710,7 @@ async function appendPostLogWithRetry(supabase, m, row, attempts = 5) {
 async function runMarketingAutomationCycle(supabase, opts = {}) {
   if (!supabase) return { ok: false, skipped: true, reason: "no_db" };
   const cfg = await getStoreConfig(supabase);
-  const m = normalizeMarketingConfig(cfg);
+  const m = await applyConnectionOverlay(supabase, normalizeMarketingConfig(cfg));
   if (!m.enabled) return { ok: true, skipped: true, reason: "marketing_disabled" };
 
   const maxPerDay = Number(m.settings && m.settings.maxPostsPerDay) || 3;
@@ -728,7 +855,7 @@ async function runMarketingAutomationCycle(supabase, opts = {}) {
 async function refreshMarketingTokens(supabase) {
   if (!supabase) return { ok: false, refreshed: 0, failed: 0, skipped: true };
   const cfg = await getStoreConfig(supabase);
-  const m = normalizeMarketingConfig(cfg);
+  const m = await applyConnectionOverlay(supabase, normalizeMarketingConfig(cfg));
   let refreshed = 0;
   let failed = 0;
   const platformsPatch = {};
@@ -812,4 +939,5 @@ module.exports = {
   runMarketingAutomationCycle,
   postNowForPlatform,
   refreshMarketingTokens,
+  backfillMarketingConnectionsFromStoreConfig,
 };

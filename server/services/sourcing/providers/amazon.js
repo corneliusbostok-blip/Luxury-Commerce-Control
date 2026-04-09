@@ -2,6 +2,7 @@ const { normalizeDiscoveredPriceToDkk } = require("../../currency");
 const { inferCategory, inferProductColor } = require("../../category");
 const { FixedWindowRateLimiter } = require("./rate-limiter");
 const { normalizeImages, normalizeVariants } = require("../../product-sync-normalizer");
+const { chooseBestProductImage, improveImageUrlQuality } = require("../../image-quality");
 
 const limiter = new FixedWindowRateLimiter({
   maxRequests: Number(process.env.AMAZON_API_RATE_LIMIT_PER_SEC) || 3,
@@ -46,9 +47,20 @@ async function fetchAmazonProductCandidates(limit, options = {}) {
     const priceRaw = Number(it.product_price_value || it.price || 0);
     const image = String(it.product_photo || it.image || "").trim();
     const url = String(it.product_url || it.url || "").trim();
-    if (!title || !priceRaw || !image || !url) continue;
+    if (!title || !priceRaw || !url) continue;
     const price = normalizeDiscoveredPriceToDkk(priceRaw, String(it.currency || "USD"), url);
-    const images = normalizeImages([image, it.thumbnail, it.image_url], image);
+    const selected = chooseBestProductImage([image, it.image_url, it.thumbnail]);
+    if (!selected.image) {
+      console.log("[discovery:image] reject", {
+        provider: "amazon",
+        reason: "no_valid_image",
+        title: title.slice(0, 140),
+        sourceUrl: url,
+        rejected: selected.rejected.slice(0, 6),
+      });
+      continue;
+    }
+    const images = normalizeImages([selected.image, ...selected.accepted.map((x) => x.url)], selected.image);
     const variants = normalizeVariants(
       [{ size: null, color: inferProductColor(title), price, available: true }],
       { size: "unknown", color: inferProductColor(title), price, available: true }
@@ -56,7 +68,7 @@ async function fetchAmazonProductCandidates(limit, options = {}) {
     out.push({
       title,
       price,
-      image: images[0] || image,
+      image: improveImageUrlQuality(images[0] || selected.image),
       externalId: `amazon:${String(it.asin || it.product_id || url).slice(0, 180)}`,
       category: inferCategory(title),
       color: inferProductColor(title),

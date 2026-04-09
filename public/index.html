@@ -247,6 +247,40 @@
             maximumFractionDigits: 0,
           }).format(n);
         }
+        function safeImageUrl(url) {
+          var raw = String(url || "").trim();
+          if (!raw) return "";
+          raw = raw.replace(/([?&])width=\d+/gi, "$1width=1000");
+          raw = raw.replace(/([?&])w=\d+/gi, "$1w=1000");
+          raw = raw.replace(/([?&])size=small\b/gi, "$1size=large");
+          raw = raw.replace(/\/s-l\d{2,4}\.(jpg|jpeg|png|webp)(\?|$)/i, "/s-l1600.$1$2");
+          if (!(/^https?:\/\//i.test(raw) || raw.charAt(0) === "/")) return "";
+          var low = raw.toLowerCase();
+          if (
+            low.indexOf("placeholder") >= 0 ||
+            low.indexOf("thumbnail") >= 0 ||
+            low.indexOf("logo") >= 0 ||
+            low.indexOf("icon") >= 0
+          ) {
+            return "";
+          }
+          return raw;
+        }
+        function cardImageFromProduct(p) {
+          var urls = [];
+          if (Array.isArray(p.images)) urls = urls.concat(p.images);
+          if (Array.isArray(p.colorVariants)) {
+            p.colorVariants.forEach(function (v) {
+              if (v && v.image_url) urls.push(v.image_url);
+            });
+          }
+          urls.push(p.image_url || "");
+          for (var i = 0; i < urls.length; i += 1) {
+            var u = safeImageUrl(urls[i]);
+            if (u) return u;
+          }
+          return "";
+        }
         fetch("/api/products")
           .then(function (r) {
             return r.json();
@@ -263,9 +297,20 @@
               var a = document.createElement("a");
               a.href = "/product.html?id=" + encodeURIComponent(p.id);
               a.className = "product-card";
+              var imageCandidates = [];
+              if (Array.isArray(p.images)) imageCandidates = imageCandidates.concat(p.images);
+              if (Array.isArray(p.colorVariants)) {
+                p.colorVariants.forEach(function (v) {
+                  if (v && v.image_url) imageCandidates.push(v.image_url);
+                });
+              }
+              imageCandidates.push(p.image_url || "");
+              imageCandidates = imageCandidates
+                .map(function (u) { return safeImageUrl(u); })
+                .filter(Boolean);
               a.innerHTML =
                 '<div class="product-card__img"><img src="' +
-                (p.image_url || "") +
+                (imageCandidates[0] || cardImageFromProduct(p)) +
                 '" alt="" loading="lazy" width="600" height="800" /></div>' +
                 '<div class="product-card__meta">' +
                 (p.categoryLabel || "") +
@@ -277,6 +322,26 @@
                 fmt(p.price) +
                 "</div>";
               grid.appendChild(a);
+              var img = a.querySelector("img");
+              if (img) {
+                var ci = 0;
+                function tryNext() {
+                  ci += 1;
+                  if (ci >= imageCandidates.length) {
+                    img.removeAttribute("src");
+                    return;
+                  }
+                  img.src = imageCandidates[ci];
+                }
+                img.onerror = function () {
+                  tryNext();
+                };
+                img.onload = function () {
+                  if (Number(this.naturalWidth || 0) > 0 && Number(this.naturalWidth || 0) < 500) {
+                    tryNext();
+                  }
+                };
+              }
             });
           })
           .catch(function () {

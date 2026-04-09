@@ -122,8 +122,50 @@
         function safeImageUrl(url) {
           var raw = String(url || "").trim();
           if (!raw) return "";
-          if (/^https?:\/\//i.test(raw) || raw.charAt(0) === "/") return raw;
+          raw = raw.replace(/([?&])width=\d+/gi, "$1width=1000");
+          raw = raw.replace(/([?&])w=\d+/gi, "$1w=1000");
+          raw = raw.replace(/([?&])size=small\b/gi, "$1size=large");
+          raw = raw.replace(/\/s-l\d{2,4}\.(jpg|jpeg|png|webp)(\?|$)/i, "/s-l1600.$1$2");
+          if (!(/^https?:\/\//i.test(raw) || raw.charAt(0) === "/")) return "";
+          var low = raw.toLowerCase();
+          if (
+            low.indexOf("placeholder") >= 0 ||
+            low.indexOf("thumbnail") >= 0 ||
+            low.indexOf("logo") >= 0 ||
+            low.indexOf("icon") >= 0
+          ) {
+            return "";
+          }
+          return raw;
+        }
+        function cardImageFromProduct(p) {
+          var urls = [];
+          if (Array.isArray(p.images)) urls = urls.concat(p.images);
+          if (Array.isArray(p.colorVariants)) {
+            p.colorVariants.forEach(function (v) {
+              if (v && v.image_url) urls.push(v.image_url);
+            });
+          }
+          urls.push(p.image_url || "");
+          for (var i = 0; i < urls.length; i += 1) {
+            var ok = safeImageUrl(urls[i]);
+            if (ok) return ok;
+          }
           return "";
+        }
+        function collectCandidatesFromDetailPayload(dp) {
+          var urls = [];
+          if (Array.isArray(dp && dp.images)) urls = urls.concat(dp.images);
+          if (Array.isArray(dp && dp.image_urls)) urls = urls.concat(dp.image_urls);
+          if (Array.isArray(dp && dp.colorVariants)) {
+            dp.colorVariants.forEach(function (v) {
+              if (v && v.image_url) urls.push(v.image_url);
+            });
+          }
+          if (dp && dp.image_url) urls.push(dp.image_url);
+          return urls
+            .map(function (u) { return safeImageUrl(u); })
+            .filter(Boolean);
         }
 
         function qs() {
@@ -164,9 +206,22 @@
             var a = document.createElement("a");
             a.href = "/product.html?id=" + encodeURIComponent(p.id) + (q ? "&" + q : "");
             a.className = "product-card";
+            var imageCandidates = [];
+            if (Array.isArray(p.images)) imageCandidates = imageCandidates.concat(p.images);
+            if (Array.isArray(p.colorVariants)) {
+              p.colorVariants.forEach(function (v) {
+                if (v && v.image_url) imageCandidates.push(v.image_url);
+              });
+            }
+            imageCandidates.push(p.image_url || "");
+            imageCandidates = imageCandidates
+              .map(function (u) { return safeImageUrl(u); })
+              .filter(Boolean);
+            var imgUrl = imageCandidates[0] || "";
+            if (!imgUrl) return;
             a.innerHTML =
               '<div class="product-card__img"><img src="' +
-              esc(safeImageUrl(p.image_url || "")) +
+              esc(imgUrl) +
               '" alt="" loading="lazy" width="600" height="800" /></div>' +
               '<div class="product-card__meta">' +
               esc(meta) +
@@ -178,6 +233,67 @@
               esc(priceStr) +
               "</div>";
             grid.appendChild(a);
+            var cardImg = a.querySelector("img");
+            if (cardImg) {
+              var ci = 0;
+              var hydrated = false;
+              function tryNext() {
+                ci += 1;
+                if (ci >= imageCandidates.length) {
+                  if (hydrated) {
+                    if (a && a.parentNode) a.parentNode.removeChild(a);
+                    if (!grid.querySelector(".product-card")) {
+                      grid.innerHTML = '<p class="message">Intet matcher disse filtre.</p>';
+                    }
+                    return;
+                  }
+                  hydrated = true;
+                  fetch("/api/product/" + encodeURIComponent(p.id))
+                    .then(function (r) { return r.json(); })
+                    .then(function (j) {
+                      if (!j || !j.ok || !j.product) {
+                        cardImg.removeAttribute("src");
+                        return;
+                      }
+                      var extra = collectCandidatesFromDetailPayload(j.product);
+                      if (!extra.length) {
+                        if (a && a.parentNode) a.parentNode.removeChild(a);
+                        if (!grid.querySelector(".product-card")) {
+                          grid.innerHTML = '<p class="message">Intet matcher disse filtre.</p>';
+                        }
+                        return;
+                      }
+                      imageCandidates = imageCandidates.concat(
+                        extra.filter(function (u) { return imageCandidates.indexOf(u) < 0; })
+                      );
+                      if (ci < imageCandidates.length) {
+                        cardImg.src = imageCandidates[ci];
+                        return;
+                      }
+                      if (a && a.parentNode) a.parentNode.removeChild(a);
+                      if (!grid.querySelector(".product-card")) {
+                        grid.innerHTML = '<p class="message">Intet matcher disse filtre.</p>';
+                      }
+                    })
+                    .catch(function () {
+                      if (a && a.parentNode) a.parentNode.removeChild(a);
+                      if (!grid.querySelector(".product-card")) {
+                        grid.innerHTML = '<p class="message">Intet matcher disse filtre.</p>';
+                      }
+                    });
+                  return;
+                }
+                cardImg.src = imageCandidates[ci];
+              }
+              cardImg.onerror = function () {
+                tryNext();
+              };
+              cardImg.onload = function () {
+                if (Number(this.naturalWidth || 0) > 0 && Number(this.naturalWidth || 0) < 500) {
+                  tryNext();
+                }
+              };
+            }
           });
         }
 

@@ -3,7 +3,7 @@
  * products → regenerate marketing content → AiMemory + AiLog. Runs on server start + setInterval.
  */
 const { decideWithGemini, performanceScore } = require("./ai/brain");
-const { randomUUID } = require("crypto");
+const { randomUUID, createHash } = require("crypto");
 const { discoverProducts, discoverProductsDetailed } = require("./services/discovery");
 const { priceFromCost, priceFromCostDeterministic } = require("./services/pricing");
 const { computeOptimalPrice } = require("./services/pricing/price-engine");
@@ -22,14 +22,13 @@ const {
   loadSourcingUserRejects,
   candidateBlockedByUserMemory,
 } = require("./services/sourcing-memory");
-const { enforceBusinessRules, enforceRiskCapsOnPlan } = require("./services/policy");
+const { enforceRiskCapsOnPlan } = require("./services/policy");
 const { canInsertCategory, categoryRankPenalty } = require("./services/policy");
 const { acquireLock, releaseLock } = require("./services/automation-lock");
 const { logProductTransition } = require("./services/product-state");
 const { computeStoreMetrics } = require("./services/business-metrics");
 const { recordDailyMetrics, getLastNDaysTrends } = require("./services/trends");
 const { recordLearningMetrics } = require("./services/learning-observability");
-const { adjustPricesForAOV } = require("./services/pricing-strategy");
 const { snapshotProducts, restoreProducts } = require("./services/rollback");
 const { assignVariant } = require("./services/experiments");
 const { evaluateExperimentResults } = require("./services/experiment-evaluator");
@@ -39,7 +38,6 @@ const { computeStrategyState } = require("./services/strategy");
 const {
   recordPriceElasticityChange,
   backfillElasticityOutcomes,
-  elasticityMultiplierForCategory,
 } = require("./services/price-elasticity");
 const { inferIntentCategory, generateCategoryQueryPack } = require("./services/sourcing/query-engine");
 const { matchesTrendText } = require("./services/trends/trend-engine");
@@ -334,6 +332,15 @@ function getAutomationState() {
   };
 }
 
+function getHardLimitsSnapshot() {
+  return {
+    maxActionsPerCycle: MAX_ACTIONS_PER_CYCLE,
+    maxDeactivateActionsPerCycle: MAX_DEACTIVATE_ACTIONS_PER_CYCLE,
+    maxScaleActionsPerCycle: MAX_SCALE_ACTIONS_PER_CYCLE,
+    maxPriceActionsPerCycle: MAX_PRICE_ACTIONS_PER_CYCLE,
+  };
+}
+
 function resetAutomationCircuitBreaker() {
   state.circuitBreaker = {
     tripped: false,
@@ -346,6 +353,10 @@ function resetAutomationCircuitBreaker() {
 
 function deterministicUniqueSortedIds(values) {
   return [...new Set((values || []).filter(Boolean).map((v) => String(v)))].sort((a, b) => a.localeCompare(b));
+}
+
+function mapProductsById(products) {
+  return Object.fromEntries((products || []).map((p) => [String(p && p.id ? p.id : ""), p]).filter(([id]) => id));
 }
 
 function deterministicPriceAdjustments(adjustments) {
@@ -382,6 +393,138 @@ function createDeterministicPlan(plan) {
     contentTargets,
     insights: Array.isArray(plan && plan.insights) ? plan.insights : [],
   };
+}
+
+function computeStateVersion(products) {
+  function normalizeNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    return Number(n.toFixed(6));
+  }
+  function normalizeString(value) {
+    return String(value == null ? "" : value).trim();
+  }
+  const canonical = [...(products || [])]
+    .map((p) => ({
+      id: normalizeString(p && p.id),
+      status: normalizeString(p && p.status).toLowerCase(),
+      price: normalizeNumber(p && p.price),
+      score: normalizeNumber(p && p.score),
+      updated_at: normalizeString(p && p.updated_at),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function buildTargetState(currentState, context = {}) {
+  const products = Array.isArray(currentState && currentState.products) ? currentState.products : [];
+  const storeConfig = (context && context.storeConfig) || {};
+  const aiTarget = context && context.aiTarget && typeof context.aiTarget === "object" ? context.aiTarget : {};
+  const activeCount = countShopfrontCatalogProducts(products);
+  const inactiveCount = products.filter((p) => String(p.status || "").toLowerCase() === "inactive").length;
+  const configuredTarget = Number(storeConfig.maxCatalogProducts) || DEFAULT_TARGET_ACTIVE_PRODUCTS;
+  const desiredActiveProducts = Math.max(1, Number(aiTarget.desiredActiveProducts) || configuredTarget);
+  const maxInactiveProducts = Math.max(0, Number(aiTarget.maxInactiveProducts) || DEFAULT_TARGET_MAX_INACTIVE);
+  const targetMargin = Math.max(0.1, Number(storeConfig.targetMargin) || 0.2);
+  const priceMin = Number(storeConfig.priceRange && storeConfig.priceRange.min) || 29;
+  const priceMax = Number(storeConfig.priceRange && storeConfig.priceRange.max) || 9999;
+  return {
+    version: "target-state-v1",
+    desired: {
+      activeProducts: desiredActiveProducts,
+      maxInactiveProducts,
+      noDuplicates: true,
+      noDelete: true,
+    },
+    policy: {
+      allowedActions: ALLOWED_ACTIONS,
+      targetMargin,
+      minPrice: priceMin,
+      maxPrice: priceMax,
+      maxPriceUpdates: MAX_PRICE_ACTIONS_PER_CYCLE,
+      maxScaleUpdates: MAX_SCALE_ACTIONS_PER_CYCLE,
+      maxDeactivateUpdates: MAX_DEACTIVATE_ACTIONS_PER_CYCLE,
+      maxActions: MAX_ACTIONS_PER_CYCLE,
+    },
+    observed: {
+      activeCount,
+      inactiveCount,
+    },
+    source: {
+      planner: "ai",
+      mode: "target_only",
+    },
+  };
+}
+
+function buildExecutionPlan(currentState, targetState) {
+  const products = Array.isArray(currentState && currentState.products) ? currentState.products : [];
+  const byId = mapProductsById(products);
+  const desiredActive = Math.max(1, Number(targetState && targetState.desired && targetState.desired.activeProducts) || DEFAULT_TARGET_ACTIVE_PRODUCTS);
+  const maxInactive = Math.max(0, Number(targetState && targetState.desired && targetState.desired.maxInactiveProducts) || DEFAULT_TARGET_MAX_INACTIVE);
+  const policy = (targetState && targetState.policy) || {};
+  const activeCount = countShopfrontCatalogProducts(products);
+  const inactiveCount = products.filter((p) => String(p.status || "").toLowerCase() === "inactive").length;
+  const needCreate = Math.max(0, desiredActive - activeCount);
+  const needDeactivate = Math.max(0, activeCount - desiredActive);
+  const deactivateBudget = Math.max(0, maxInactive - inactiveCount);
+  const deactivateIds = pickDeterministicDeactivateCandidates(
+    products,
+    Math.min(needDeactivate, deactivateBudget, Number(policy.maxDeactivateUpdates) || MAX_DEACTIVATE_ACTIONS_PER_CYCLE)
+  );
+  const scaleIds = [...products]
+    .filter((p) => p && p.id && p.status !== "removed" && p.status !== "inactive" && p.status !== "scaling")
+    .sort((a, b) => {
+      const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .slice(0, Number(policy.maxScaleUpdates) || MAX_SCALE_ACTIONS_PER_CYCLE)
+    .map((p) => String(p.id));
+  const priceUpdates = [...products]
+    .filter((p) => p && p.id && p.status !== "removed" && p.status !== "inactive")
+    .map((p) => {
+      const oldPrice = Number(p.price) || 0;
+      const nextPrice = computeOptimalPrice(p, {
+        targetMargin: Number(policy.targetMargin) || 0.2,
+        minPrice: Number(policy.minPrice) || 29,
+        maxPrice: Number(policy.maxPrice) || 9999,
+      });
+      return {
+        id: String(p.id),
+        oldPrice,
+        newPrice: Number(nextPrice) || oldPrice,
+      };
+    })
+    .filter((u) => Number.isFinite(u.newPrice) && u.newPrice > 0 && Math.abs(u.newPrice - u.oldPrice) >= 1)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .slice(0, Number(policy.maxPriceUpdates) || MAX_PRICE_ACTIONS_PER_CYCLE)
+    .map((u) => ({ id: u.id, newPrice: u.newPrice }));
+  const executionPlan = createDeterministicPlan({
+    addProducts: needCreate,
+    removeProductIds: deactivateIds,
+    scaleProductIds: scaleIds,
+    priceUpdates,
+    contentProductIds: [],
+    promoteProductIds: [],
+    insights: [],
+  });
+  return {
+    ...executionPlan,
+    _meta: {
+      reconciliation: true,
+      desiredActive,
+      activeCount,
+      maxInactive,
+      inactiveCount,
+      stateVersion: computeStateVersion(products),
+    },
+    _byId: byId,
+  };
+}
+
+function diff(currentState, targetState) {
+  return buildExecutionPlan(currentState, targetState);
 }
 
 function filterUnsafeActions(plan, productsById) {
@@ -424,7 +567,8 @@ function filterUnsafeActions(plan, productsById) {
   return { filtered, violations };
 }
 
-function validatePlan(plan, productsById, storeConfig, systemState) {
+function validatePlan(plan, productsById, systemState, options = {}) {
+  const requireReconciliation = Boolean(options && options.requireReconciliation);
   if (!plan || typeof plan !== "object") {
     return { ok: false, reason: "plan_missing_or_invalid", safePlan: null, violations: ["plan_missing_or_invalid"] };
   }
@@ -434,6 +578,9 @@ function validatePlan(plan, productsById, storeConfig, systemState) {
   const filteredResult = filterUnsafeActions(plan, productsById);
   const violations = [...filteredResult.violations];
   const safePlan = filteredResult.filtered;
+  if (requireReconciliation && safePlan._meta && safePlan._meta.reconciliation !== true) {
+    violations.push("non_reconciliation_plan_not_allowed");
+  }
   const allIds = new Set();
   for (const id of safePlan.removeProductIds || []) {
     if (allIds.has(`remove:${id}`)) violations.push(`duplicate_remove:${id}`);
@@ -478,28 +625,6 @@ function pickDeterministicDeactivateCandidates(products, count) {
       return String(a.id).localeCompare(String(b.id));
     });
   return pool.slice(0, n).map((p) => String(p.id));
-}
-
-function buildTargetStatePlan(products, storeConfig) {
-  const activeCount = countShopfrontCatalogProducts(products);
-  const inactiveCount = (products || []).filter((p) => String(p.status || "").toLowerCase() === "inactive").length;
-  const configuredTarget = Number(storeConfig && storeConfig.maxCatalogProducts) || DEFAULT_TARGET_ACTIVE_PRODUCTS;
-  const targetActive = Math.max(1, configuredTarget);
-  const targetMaxInactive = DEFAULT_TARGET_MAX_INACTIVE;
-  const needCreate = Math.max(0, targetActive - activeCount);
-  const needDeactivate = Math.max(0, activeCount - targetActive);
-  const deactivateBudget = Math.max(0, targetMaxInactive - inactiveCount);
-  const deactivateCount = Math.min(needDeactivate, deactivateBudget, MAX_DEACTIVATE_ACTIONS_PER_CYCLE);
-  return {
-    targetActive,
-    targetMaxInactive,
-    activeCount,
-    inactiveCount,
-    plan: {
-      addProducts: needCreate,
-      removeProductIds: pickDeterministicDeactivateCandidates(products, deactivateCount),
-    },
-  };
 }
 
 function buildExecutionQueueFromPlan(plan) {
@@ -751,21 +876,21 @@ async function syncScores(supabase, products) {
   }
 }
 
-async function applyPlan(supabase, plan, productsById, cycleId) {
+async function applyPlan(supabase, plan, productsById, cycleId, systemState, hardLimits) {
   const decisions = [];
   const nowIso = new Date().toISOString();
   const cooldownDays = Math.max(1, Number(process.env.REMOVE_COOLDOWN_DAYS) || 14);
   const cooldownUntil = new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toISOString();
   const dryRun = Boolean(plan && plan.__dryRun);
   const queue = buildExecutionQueueFromPlan(plan);
-  const validated = validateExecutionQueue(queue, productsById, state);
+  const validated = validateExecutionQueue(queue, productsById, systemState);
   if (validated.violations.length) {
     await logAi(supabase, "plan_validated_with_limits", {
       cycleId,
       violations: validated.violations,
       queueRequested: queue.length,
       queueAccepted: validated.accepted.length,
-      hardLimits: getAutomationState().hardLimits,
+      hardLimits: hardLimits || null,
     });
     return [];
   }
@@ -1349,6 +1474,14 @@ async function insertEnrichedProducts(supabase, rawList, count, cycleId, strateg
     const category = evalResult.category || raw.category || inferCategory(raw.title);
     const color = raw.color || inferProductColor(evalResult.title);
     const normalizedImages = normalizeImages(raw.images || evalResult.images || [evalResult.image], evalResult.image);
+    if (!Array.isArray(normalizedImages) || normalizedImages.length === 0) {
+      console.log("SOURCING SKIP PRODUCT:", {
+        reason: "missing_image",
+        title: String(evalResult.title || raw.title || "").slice(0, 140),
+        sourceUrl: String(evalResult.sourceUrl || raw.sourceUrl || ""),
+      });
+      continue;
+    }
     const normalizedVariants = normalizeVariants(raw.variants || evalResult.variants, {
       size: raw.sizes ? String(raw.sizes).split(",")[0] : "unknown",
       color,
@@ -2489,6 +2622,8 @@ async function runAutomationCycle(supabase, opts = {}) {
   const lockKey = "automation:ceo-cycle";
   let hasLock = false;
   let rollbackSnapshot = [];
+  const cycleSystemState = { circuitBreaker: { ...state.circuitBreaker } };
+  const cycleHardLimits = getHardLimitsSnapshot();
 
   try {
     if (state.circuitBreaker.tripped) {
@@ -2557,7 +2692,7 @@ async function runAutomationCycle(supabase, opts = {}) {
     const memories = await loadMemories(supabase);
     const shopReadyBeforePlan = countShopfrontCatalogProducts(products);
     await logAi(supabase, "ceo_phase_read", { cycleId, phase: "READ" });
-    const plan = await decideWithGemini({
+    const aiDecision = await decideWithGemini({
       products,
       memories,
       businessMetrics,
@@ -2584,56 +2719,46 @@ async function runAutomationCycle(supabase, opts = {}) {
     });
     logger.info("automation.cycle.ai_decision_received", {
       cycleId,
-      removeCount: Array.isArray(plan && plan.removeProductIds) ? plan.removeProductIds.length : 0,
-      scaleCount: Array.isArray(plan && plan.scaleProductIds) ? plan.scaleProductIds.length : 0,
-      priceCount: Array.isArray(plan && plan.priceUpdates) ? plan.priceUpdates.length : 0,
+      removeCount: Array.isArray(aiDecision && aiDecision.removeProductIds) ? aiDecision.removeProductIds.length : 0,
+      scaleCount: Array.isArray(aiDecision && aiDecision.scaleProductIds) ? aiDecision.scaleProductIds.length : 0,
+      priceCount: Array.isArray(aiDecision && aiDecision.priceUpdates) ? aiDecision.priceUpdates.length : 0,
     });
     await logAi(supabase, "ceo_phase_plan", { cycleId, phase: "PLAN" });
-    const rulePlan = createDeterministicPlan(enforceBusinessRules(plan, products));
-    const elasticityByCategory = {};
-    const cats = [...new Set(products.map((p) => String(p.category || "other")))];
-    for (const c of cats) {
-      elasticityByCategory[c] = await elasticityMultiplierForCategory(supabase, c);
-    }
-    const strategyUpdates = adjustPricesForAOV(products, businessMetrics, {
-      pricingAggressiveness: tuned.pricingAggressiveness,
-      elasticityByCategory,
-      targetMargin: storeConfig.targetMargin,
-      priceRange: storeConfig.priceRange,
-    });
-    rulePlan.priceUpdates = deterministicPriceAdjustments([...(rulePlan.priceUpdates || []), ...strategyUpdates]);
-    rulePlan.priceAdjustments = rulePlan.priceUpdates;
-    const adaptMult = await loadRiskAdaptMultiplier(supabase);
-    Object.assign(
-      rulePlan,
-      enforceRiskCapsOnPlan(rulePlan, products, storeConfig.strategy && storeConfig.strategy.risk, {
-        adaptMultiplier: adaptMult,
-      })
-    );
-    const targetState = buildTargetStatePlan(products, storeConfig);
-    const preValidatedPlan = createDeterministicPlan({
-      ...rulePlan,
-      addProducts: Math.max(Number(rulePlan.addProducts) || 0, Number(targetState.plan.addProducts) || 0),
-      removeProductIds: deterministicUniqueSortedIds([
-        ...(rulePlan.removeProductIds || []),
-        ...(targetState.plan.removeProductIds || []),
-      ]),
-    });
-    await logAi(supabase, "ceo_plan_raw", {
+    const aiTarget = {
+      desiredActiveProducts:
+        Number(aiDecision && aiDecision.targetState && aiDecision.targetState.desiredActiveProducts) ||
+        Number(aiDecision && aiDecision.desiredActiveProducts) ||
+        null,
+      maxInactiveProducts:
+        Number(aiDecision && aiDecision.targetState && aiDecision.targetState.maxInactiveProducts) ||
+        Number(aiDecision && aiDecision.maxInactiveProducts) ||
+        null,
+    };
+    const targetState = buildTargetState({ products }, { storeConfig, aiTarget });
+    await logAi(supabase, "ceo_target_state_raw", {
       cycleId,
       dryRun,
-      plan: preValidatedPlan,
-      targetState: {
-        targetActive: targetState.targetActive,
-        targetMaxInactive: targetState.targetMaxInactive,
-        activeCount: targetState.activeCount,
-        inactiveCount: targetState.inactiveCount,
-      },
+      targetState,
     });
-    const validatedPlan = validatePlan(preValidatedPlan, Object.fromEntries(products.map((p) => [p.id, p])), storeConfig, state);
+    const executionPlan = diff({ products }, targetState);
+    const boundedExecutionPlan = createDeterministicPlan(
+      enforceRiskCapsOnPlan(
+        executionPlan,
+        products,
+        storeConfig.strategy && storeConfig.strategy.risk,
+        { adaptMultiplier: await loadRiskAdaptMultiplier(supabase) }
+      )
+    );
+    boundedExecutionPlan._meta = { ...(executionPlan._meta || {}) };
+    const validatedPlan = validatePlan(
+      boundedExecutionPlan,
+      executionPlan._byId || mapProductsById(products),
+      cycleSystemState,
+      { requireReconciliation: true }
+    );
     if (!validatedPlan.ok) {
       state.lastPlan = null;
-      await logAi(supabase, "ceo_plan_rejected", {
+      await logAi(supabase, "ceo_diff_plan_rejected", {
         cycleId,
         dryRun,
         reason: validatedPlan.reason,
@@ -2642,7 +2767,7 @@ async function runAutomationCycle(supabase, opts = {}) {
       return;
     }
     const safePlan = validatedPlan.safePlan;
-    await logAi(supabase, "ceo_plan_validated", {
+    await logAi(supabase, "ceo_diff_plan_validated", {
       cycleId,
       dryRun,
       safePlan,
@@ -2718,7 +2843,21 @@ async function runAutomationCycle(supabase, opts = {}) {
       return;
     }
 
-    const byId = Object.fromEntries(products.map((p) => [p.id, p]));
+    const latestProductsBeforeExecute = dryRun ? products : await loadProducts(supabase);
+    const byId = mapProductsById(latestProductsBeforeExecute);
+    const stateVersionBeforeExecute = computeStateVersion(latestProductsBeforeExecute);
+    const latestProductsAtExecute = dryRun ? latestProductsBeforeExecute : await loadProducts(supabase);
+    const stateVersionAtExecute = computeStateVersion(latestProductsAtExecute);
+    if (stateVersionBeforeExecute !== stateVersionAtExecute) {
+      await logAi(supabase, "ceo_state_version_changed_abort", {
+        cycleId,
+        dryRun,
+        before: stateVersionBeforeExecute,
+        current: stateVersionAtExecute,
+      });
+      state.lastError = "State changed during cycle; execution aborted.";
+      return;
+    }
     const affectedIds = [
       ...(safePlan.removeProductIds || []),
       ...(safePlan.scaleProductIds || []),
@@ -2726,7 +2865,14 @@ async function runAutomationCycle(supabase, opts = {}) {
     ];
     rollbackSnapshot = await snapshotProducts(supabase, affectedIds);
     await logAi(supabase, "ceo_phase_execute", { cycleId, phase: "EXECUTE" });
-    const applied = await applyPlan(supabase, { ...safePlan, __dryRun: dryRun }, byId, cycleId);
+    const applied = await applyPlan(
+      supabase,
+      { ...safePlan, __dryRun: dryRun },
+      byId,
+      cycleId,
+      cycleSystemState,
+      cycleHardLimits
+    );
     logger.info("automation.cycle.db_writes_applied", { cycleId, appliedCount: applied.length });
     state.decisionsLastRun = applied;
     state.productsRemovedLastRun = applied.filter((d) => d.type === "deactivate").length;
@@ -2868,7 +3014,8 @@ async function runAutomationCycle(supabase, opts = {}) {
       dryRun,
       executedActions: applied,
       validation: { ok: true },
-      targetState: buildTargetStatePlan(productsAfter, storeConfig),
+      targetState,
+      stateVersion: stateVersionBeforeExecute,
     });
     await logAi(supabase, "ceo_phase_pause", {
       cycleId,
@@ -2942,6 +3089,53 @@ async function runAutomationCycle(supabase, opts = {}) {
       removed: state.productsRemovedLastRun,
     });
   }
+}
+
+async function previewAutomationValidator(supabase, opts = {}) {
+  if (!supabase) {
+    return {
+      ok: false,
+      error: "Supabase not configured",
+      preview: null,
+    };
+  }
+  const products = await loadProducts(supabase);
+  const storeConfig = await getStoreConfig(supabase);
+  const aiTarget = {
+    desiredActiveProducts: Number(opts.desiredActiveProducts) || null,
+    maxInactiveProducts: Number(opts.maxInactiveProducts) || null,
+  };
+  const targetState = buildTargetState({ products }, { storeConfig, aiTarget });
+  const executionPlan = diff({ products }, targetState);
+  const boundedPlan = createDeterministicPlan(
+    enforceRiskCapsOnPlan(
+      executionPlan,
+      products,
+      storeConfig.strategy && storeConfig.strategy.risk,
+      { adaptMultiplier: await loadRiskAdaptMultiplier(supabase) }
+    )
+  );
+  boundedPlan._meta = { ...(executionPlan._meta || {}) };
+  const productsById = executionPlan._byId || mapProductsById(products);
+  const previewSystemState = { circuitBreaker: { ...state.circuitBreaker } };
+  const planValidation = validatePlan(boundedPlan, productsById, previewSystemState, {
+    requireReconciliation: false,
+  });
+  const queue = planValidation.ok ? buildExecutionQueueFromPlan(planValidation.safePlan) : [];
+  const queueValidation = validateExecutionQueue(queue, productsById, previewSystemState);
+  return {
+    ok: true,
+    preview: {
+      dryRun: true,
+      targetState,
+      executionPlan: boundedPlan,
+      planValidation,
+      queue,
+      queueValidation,
+      stateVersion: computeStateVersion(products),
+      hardLimits: getHardLimitsSnapshot(),
+    },
+  };
 }
 
 /**
@@ -3381,6 +3575,8 @@ module.exports = {
   setCeoAutomationPaused,
   isCeoAutomationPaused,
   resetAutomationCircuitBreaker,
+  previewAutomationValidator,
+  diff,
   CEO_INTERVAL_MS,
   SOURCING_INTERVAL_MS,
 };

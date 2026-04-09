@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { resolvePublicUrl } = require("../../lib/public-url");
+const { createOauthState: createDbOauthState, consumeOauthState: consumeDbOauthState } = require("./connection-store");
 
 const oauthStateStore = new Map();
 
@@ -14,7 +15,11 @@ function gcOauthStates() {
   }
 }
 
-function createOauthState(payload = {}) {
+async function createOauthState(supabase, payload = {}) {
+  if (supabase) {
+    const dbState = await createDbOauthState(supabase, payload);
+    if (dbState) return dbState;
+  }
   gcOauthStates();
   const state = crypto.randomBytes(24).toString("hex");
   oauthStateStore.set(state, {
@@ -24,7 +29,11 @@ function createOauthState(payload = {}) {
   return state;
 }
 
-function consumeOauthState(state) {
+async function consumeOauthState(supabase, state) {
+  if (supabase) {
+    const dbState = await consumeDbOauthState(supabase, state);
+    if (dbState) return dbState;
+  }
   gcOauthStates();
   const key = String(state || "");
   const row = oauthStateStore.get(key) || null;
@@ -34,6 +43,7 @@ function consumeOauthState(state) {
 
 function facebookAuthorizeUrl({ platform = "facebook", state }) {
   const clientId = String(process.env.META_APP_ID || "").trim();
+  if (!clientId) return { ok: false, error: "Missing META_APP_ID" };
   const redirectUri = `${publicBaseUrl()}/api/admin/marketing/oauth/${encodeURIComponent(platform)}/callback`;
   const scope =
     platform === "instagram"
@@ -45,7 +55,7 @@ function facebookAuthorizeUrl({ platform = "facebook", state }) {
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", scope);
   url.searchParams.set("state", state);
-  return url.toString();
+  return { ok: true, url: url.toString() };
 }
 
 async function exchangeFacebookCode({ code, platform = "facebook" }) {
@@ -90,6 +100,7 @@ async function exchangeFacebookCode({ code, platform = "facebook" }) {
 
 function tiktokAuthorizeUrl({ state }) {
   const clientKey = String(process.env.TIKTOK_CLIENT_KEY || "").trim();
+  if (!clientKey) return { ok: false, error: "Missing TIKTOK_CLIENT_KEY" };
   const redirectUri = `${publicBaseUrl()}/api/admin/marketing/oauth/tiktok/callback`;
   const scope = String(process.env.TIKTOK_SCOPES || "user.info.basic,video.publish").trim();
   const url = new URL("https://www.tiktok.com/v2/auth/authorize/");
@@ -98,7 +109,7 @@ function tiktokAuthorizeUrl({ state }) {
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", scope);
   url.searchParams.set("state", state);
-  return url.toString();
+  return { ok: true, url: url.toString() };
 }
 
 async function exchangeTikTokCode({ code }) {
