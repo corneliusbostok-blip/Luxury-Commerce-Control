@@ -106,6 +106,7 @@ const {
   listFulfillmentQueueWithPriority,
   markFulfillmentQueueCompleted,
 } = require("./services/fulfillment/fulfillment-queue");
+const { processOrderFulfillment } = require("./services/fulfillment/order-fulfillment");
 const { publishEvent } = require("./services/events/bus");
 const { EVENTS } = require("./services/events/contracts");
 const { startShopEventConsumers } = require("./services/shop-service/event-consumers");
@@ -1720,6 +1721,8 @@ async function finalizePaidCheckoutSession(session, req = null) {
           revenue: Number(amountCents) / 100,
         });
       }
+      // Serverless-safe fallback: run fulfillment even if no event consumer is attached in this process.
+      await processOrderFulfillment(supabase, { orderId: ins.orderId });
     }
     return { orderId: ins.orderId, duplicate: ins.duplicate };
   }
@@ -1764,6 +1767,8 @@ async function finalizePaidCheckoutSession(session, req = null) {
       qty: 1,
       revenue: Number(amountCents) / 100,
     });
+    // Serverless-safe fallback: run fulfillment directly for environments without a live consumer.
+    await processOrderFulfillment(supabase, { orderId: ins.orderId });
   }
   return { orderId: ins.orderId, duplicate: ins.duplicate };
 }
