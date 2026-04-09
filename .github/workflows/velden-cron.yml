@@ -27,14 +27,25 @@ jobs:
           MODE: ${{ github.event.inputs.mode || 'light' }}
         run: |
           set -euo pipefail
-          if [ -z "${SITE_URL:-}" ]; then
+          # Normalize secrets: strip CR/LF, surrounding spaces, and optional quotes.
+          SITE_URL="$(printf '%s' "${SITE_URL:-}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's#^"##' -e 's#"$##' -e "s#^'##" -e "s#'$##")"
+          ADMIN_SECRET="$(printf '%s' "${ADMIN_SECRET:-}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's#^"##' -e 's#"$##' -e "s#^'##" -e "s#'$##")"
+          SITE_URL="${SITE_URL%/}"
+          if [ -z "${SITE_URL}" ]; then
             echo "Missing secret: VELDEN_SITE_URL (e.g. https://lc-corntrol.netlify.app)"
             exit 1
           fi
-          if [ -z "${ADMIN_SECRET:-}" ]; then
+          if [ -z "${ADMIN_SECRET}" ]; then
             echo "Missing secret: VELDEN_ADMIN_SECRET (same as Netlify ADMIN_SECRET)"
             exit 1
           fi
+          case "${SITE_URL}" in
+            https://*|http://*) ;;
+            *)
+              echo "VELDEN_SITE_URL must start with http:// or https:// (got: ${SITE_URL})"
+              exit 1
+              ;;
+          esac
           echo "Calling CEO cycle (${MODE})..."
           curl -sS -X POST "${SITE_URL}/api/admin/runtime/ceo-cycle" \
             -H "Content-Type: application/json" \
