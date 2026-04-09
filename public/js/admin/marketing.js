@@ -332,15 +332,55 @@
 
   // Button handlers are bound directly in renderPlatforms for robustness.
 
-  el("mk-max-posts").addEventListener("input", function () {
-    el("mk-max-label").textContent = String(el("mk-max-posts").value);
-  });
-  el("save-settings").addEventListener("click", saveSettings);
-  el("generate-test").addEventListener("click", testPost);
+  var mkMax = el("mk-max-posts");
+  if (mkMax) {
+    mkMax.addEventListener("input", function () {
+      el("mk-max-label").textContent = String(mkMax.value);
+    });
+  }
+  var saveBtn = el("save-settings");
+  if (saveBtn) saveBtn.addEventListener("click", saveSettings);
+  var genBtn = el("generate-test");
+  if (genBtn) genBtn.addEventListener("click", testPost);
 
-  Promise.all([loadStatus(), loadPosts(), loadPostProducts()]).catch(function (e) {
-    window.alert("Kunne ikke indlæse marketing side: " + errMessage(e));
+  var marketingDataStarted = false;
+  function startMarketingDataLoads() {
+    if (marketingDataStarted) return;
+    marketingDataStarted = true;
+    Promise.all([loadStatus(), loadPosts(), loadPostProducts()]).catch(function (e) {
+      var U = typeof window !== "undefined" ? window.VeldenUnauthorized : null;
+      var text = "Kunne ikke hente marketing: " + errMessage(e);
+      setNotice(text, false);
+      if (U) U.report(text);
+    });
+  }
+
+  function marketingPanelActive() {
+    var p = document.querySelector('.adm-page[data-page="marketing"]');
+    if (p) return p.classList.contains("is-active");
+    return true;
+  }
+
+  function tryStartMarketingLoads() {
+    if (!marketingPanelActive()) return;
+    startMarketingDataLoads();
+  }
+
+  document.querySelectorAll('[data-page-tab="marketing"]').forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      setTimeout(tryStartMarketingLoads, 0);
+    });
   });
+  window.addEventListener("hashchange", function () {
+    setTimeout(tryStartMarketingLoads, 0);
+  });
+  document.addEventListener("velden-admin-tabs-ready", function () {
+    tryStartMarketingLoads();
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    setTimeout(tryStartMarketingLoads, 0);
+  });
+  setTimeout(tryStartMarketingLoads, 0);
 
   (function handleOauthResult() {
     try {

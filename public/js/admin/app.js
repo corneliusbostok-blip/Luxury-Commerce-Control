@@ -65,13 +65,20 @@ function setUnauthorizedState(message) {
   reportUnauthorized(message);
 }
 
+function adminApiFailureText(data, fallback) {
+  const d = data || {};
+  if (typeof d.message === "string" && d.message.trim()) return d.message.trim();
+  if (typeof d.error === "string" && d.error.trim()) return d.error.trim();
+  return fallback || "Unauthorized";
+}
+
 async function apiRequest(url, options) {
   const opts = Object.assign({ credentials: "include" }, options || {});
   if (apiClient) {
     const r = await apiClient(url, opts);
     if (r.status === 401) {
       const data = r.data || {};
-      reportUnauthorized(String(data.message || data.error || r.message || "Unauthorized"));
+      reportUnauthorized(adminApiFailureText(data, r.message || "Unauthorized"));
     } else if (r.response && r.response.ok) {
       noteAdminHttpOk(true);
     }
@@ -86,8 +93,7 @@ async function apiRequest(url, options) {
     const r = await fetch(url, opts);
     const data = await r.json().catch(() => ({}));
     if (r.status === 401) {
-      const msg = (data && (data.message || data.error)) || "Unauthorized";
-      reportUnauthorized(String(msg));
+      reportUnauthorized(adminApiFailureText(data, "Unauthorized"));
     } else if (r.ok) {
       noteAdminHttpOk(true);
     }
@@ -1719,6 +1725,23 @@ function load() {
   if (!hasLoadedSummary) renderInitialSkeleton();
   return apiRequest("/api/admin/summary", { headers: adminHeaders({ json: false }), retries: 1 })
     .then((resp) => {
+      if (resp.status === 401) {
+        if (panelErr) {
+          panelErr.textContent = "";
+          const s = document.createElement("strong");
+          s.textContent = "Ikke logget ind. ";
+          panelErr.appendChild(s);
+          const a = document.createElement("a");
+          a.href = "/admin-login.html";
+          a.textContent = "Åbn login";
+          panelErr.appendChild(a);
+          const tail = document.createTextNode(" med samme kode som ADMIN_SECRET (Netlify).");
+          panelErr.appendChild(tail);
+          panelErr.style.display = "block";
+        }
+        renderFullSummary({ ok: false });
+        return resp.data;
+      }
       const data = resp.data || { ok: false, error: resp.message || "Could not load summary." };
       if (data && data.ok) lastSnapshot = data;
       renderFullSummary(data);
@@ -1804,6 +1827,11 @@ function load() {
   setActive(initial, { noStore: false });
   if (rawHash && REMOVED_PAGE_IDS.has(rawHash) && history && history.replaceState) {
     history.replaceState(null, "", "#" + initial);
+  }
+  try {
+    document.dispatchEvent(new CustomEvent("velden-admin-tabs-ready"));
+  } catch {
+    /* ignore */
   }
 })();
 

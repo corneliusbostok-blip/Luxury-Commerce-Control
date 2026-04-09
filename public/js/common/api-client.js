@@ -29,14 +29,17 @@
           !!res.ok &&
           ((json && (json.success === true || json.ok === true)) ||
             (!json && res.status >= 200 && res.status < 300));
+        var msg = "Request failed";
+        if (ok) msg = "OK";
+        else if (json && typeof json.message === "string" && json.message.trim()) msg = json.message.trim();
+        else if (json && typeof json.error === "string" && json.error.trim()) msg = json.error.trim();
+        else if (json && json.error && typeof json.error === "object" && json.error.code) msg = String(json.error.code);
         return {
           ok: ok,
           status: res.status,
           response: res,
           data: json,
-          message:
-            (json && (json.message || json.error)) ||
-            (ok ? "OK" : "Request failed"),
+          message: msg,
         };
       } catch (err) {
         lastErr = err;
