@@ -1,0 +1,56 @@
+name: Velden scheduled cycles
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "ceo-cycle mode: light | full"
+        required: false
+        default: "light"
+  schedule:
+    # Every 10 minutes
+    - cron: "*/10 * * * *"
+
+concurrency:
+  group: velden-cron
+  cancel-in-progress: true
+
+jobs:
+  run-cycles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call automation cycles
+        env:
+          SITE_URL: ${{ secrets.VELDEN_SITE_URL }}
+          ADMIN_SECRET: ${{ secrets.VELDEN_ADMIN_SECRET }}
+          MODE: ${{ github.event.inputs.mode || 'light' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SITE_URL:-}" ]; then
+            echo "Missing secret: VELDEN_SITE_URL (e.g. https://lc-corntrol.netlify.app)"
+            exit 1
+          fi
+          if [ -z "${ADMIN_SECRET:-}" ]; then
+            echo "Missing secret: VELDEN_ADMIN_SECRET (same as Netlify ADMIN_SECRET)"
+            exit 1
+          fi
+          echo "Calling CEO cycle (${MODE})..."
+          curl -sS -X POST "${SITE_URL}/api/admin/runtime/ceo-cycle" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: ${ADMIN_SECRET}" \
+            --data "{\"mode\":\"${MODE}\"}" | head -c 800 || true
+          echo ""
+          echo "Calling sourcing pass..."
+          curl -sS -X POST "${SITE_URL}/api/admin/runtime/sourcing-pass" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: ${ADMIN_SECRET}" \
+            --data "{}" | head -c 800 || true
+          echo ""
+          echo "Calling marketing cycle..."
+          curl -sS -X POST "${SITE_URL}/api/admin/runtime/marketing-cycle" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: ${ADMIN_SECRET}" \
+            --data "{}" | head -c 800 || true
+          echo ""
+
