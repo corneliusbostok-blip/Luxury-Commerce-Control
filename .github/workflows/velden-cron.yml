@@ -64,4 +64,10 @@ jobs:
             -H "X-Admin-Secret: ${ADMIN_SECRET}" \
             --data "{}" | head -c 800 || true
           echo ""
+          echo "Calling supplier sync..."
+          curl -sS -X POST "${SITE_URL}/api/admin/runtime/supplier-sync" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: ${ADMIN_SECRET}" \
+            --data "{}" | head -c 800 || true
+          echo ""
 
