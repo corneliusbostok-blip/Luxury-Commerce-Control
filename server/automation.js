@@ -105,6 +105,14 @@ const SOURCING_BATCH_SIZE = Math.min(
 const SOURCING_DISABLED = /^1|true|yes$/i.test(String(process.env.SOURCING_DISABLED || ""));
 /** Når sand: ingen løbende CEO-cyklus (scores, Gemini, discovery, pris/content). */
 let ceoAutomationPaused = /^1|true|yes$/i.test(String(process.env.CEO_AUTOMATION_DISABLED || ""));
+const MAX_ACTIONS_PER_CYCLE = Math.max(1, Number(process.env.CEO_MAX_ACTIONS_PER_CYCLE) || 10);
+const MAX_DEACTIVATE_ACTIONS_PER_CYCLE = Math.max(0, Number(process.env.CEO_MAX_DEACTIVATE_ACTIONS_PER_CYCLE) || 1);
+const MAX_SCALE_ACTIONS_PER_CYCLE = Math.max(0, Number(process.env.CEO_MAX_SCALE_ACTIONS_PER_CYCLE) || 4);
+const MAX_PRICE_ACTIONS_PER_CYCLE = Math.max(0, Number(process.env.CEO_MAX_PRICE_ACTIONS_PER_CYCLE) || 5);
+const CEO_ERROR_STREAK_LIMIT = Math.max(1, Number(process.env.CEO_CIRCUIT_BREAKER_ERROR_STREAK) || 3);
+const DEFAULT_TARGET_ACTIVE_PRODUCTS = Math.max(1, Number(process.env.CEO_TARGET_ACTIVE_PRODUCTS) || 100);
+const DEFAULT_TARGET_MAX_INACTIVE = Math.max(0, Number(process.env.CEO_TARGET_MAX_INACTIVE) || 5);
+const ALLOWED_ACTIONS = ["create", "update", "deactivate"];
 
 const NO_PRODUCTS_REASON = {
   DB_UNAVAILABLE: "db_unavailable",
@@ -298,6 +306,13 @@ const state = {
   sourcingIntervalMs: SOURCING_INTERVAL_MS,
   sourcingLastDiscovery: null,
   fallbackPolicy: { minMarginPct: 10, minScore: 40 },
+  circuitBreaker: {
+    tripped: false,
+    reason: null,
+    trippedAt: null,
+    errorStreak: 0,
+    lastResetAt: null,
+  },
 };
 
 function getAutomationState() {
@@ -309,6 +324,261 @@ function getAutomationState() {
     sourcingBatchSize: SOURCING_BATCH_SIZE,
     sourcingLastDiscovery: state.sourcingLastDiscovery,
     fallbackPolicy: state.fallbackPolicy,
+    hardLimits: {
+      maxActionsPerCycle: MAX_ACTIONS_PER_CYCLE,
+      maxDeactivateActionsPerCycle: MAX_DEACTIVATE_ACTIONS_PER_CYCLE,
+      maxScaleActionsPerCycle: MAX_SCALE_ACTIONS_PER_CYCLE,
+      maxPriceActionsPerCycle: MAX_PRICE_ACTIONS_PER_CYCLE,
+    },
+    circuitBreaker: state.circuitBreaker,
+  };
+}
+
+function resetAutomationCircuitBreaker() {
+  state.circuitBreaker = {
+    tripped: false,
+    reason: null,
+    trippedAt: null,
+    errorStreak: 0,
+    lastResetAt: new Date().toISOString(),
+  };
+}
+
+function deterministicUniqueSortedIds(values) {
+  return [...new Set((values || []).filter(Boolean).map((v) => String(v)))].sort((a, b) => a.localeCompare(b));
+}
+
+function deterministicPriceAdjustments(adjustments) {
+  const map = new Map();
+  for (const adj of adjustments || []) {
+    if (!adj || !adj.id || adj.newPrice == null) continue;
+    const id = String(adj.id);
+    const price = Number(adj.newPrice);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    map.set(id, price);
+  }
+  return [...map.entries()]
+    .map(([id, newPrice]) => ({ id, newPrice }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function createDeterministicPlan(plan) {
+  const removeProductIds = deterministicUniqueSortedIds(plan && plan.removeProductIds);
+  const scaleProductIds = deterministicUniqueSortedIds(plan && plan.scaleProductIds);
+  const contentProductIds = deterministicUniqueSortedIds(plan && plan.contentProductIds);
+  const promoteProductIds = deterministicUniqueSortedIds(plan && plan.promoteProductIds);
+  const priceUpdates = deterministicPriceAdjustments(plan && (plan.priceUpdates || plan.priceAdjustments));
+  const addProducts = Math.max(0, Math.floor(Number(plan && plan.addProducts) || 0));
+  const contentTargets = Math.max(0, Math.floor(Number(plan && plan.contentTargets) || 0));
+  return {
+    ...(plan || {}),
+    removeProductIds,
+    scaleProductIds,
+    contentProductIds,
+    promoteProductIds,
+    priceUpdates,
+    priceAdjustments: priceUpdates,
+    addProducts,
+    contentTargets,
+    insights: Array.isArray(plan && plan.insights) ? plan.insights : [],
+  };
+}
+
+function filterUnsafeActions(plan, productsById) {
+  const violations = [];
+  const removeProductIds = deterministicUniqueSortedIds(plan && plan.removeProductIds);
+  const scaleProductIds = deterministicUniqueSortedIds(plan && plan.scaleProductIds);
+  const priceUpdates = deterministicPriceAdjustments(plan && (plan.priceUpdates || plan.priceAdjustments));
+  const contentProductIds = deterministicUniqueSortedIds(plan && plan.contentProductIds);
+  const promoteProductIds = deterministicUniqueSortedIds(plan && plan.promoteProductIds);
+  const filtered = {
+    ...createDeterministicPlan(plan),
+    removeProductIds,
+    scaleProductIds,
+    priceUpdates,
+    priceAdjustments: priceUpdates,
+    contentProductIds,
+    promoteProductIds,
+  };
+  for (const id of removeProductIds) {
+    if (!productsById[id]) violations.push(`unknown_remove_id:${id}`);
+  }
+  for (const id of scaleProductIds) {
+    if (!productsById[id]) violations.push(`unknown_scale_id:${id}`);
+    const p = productsById[id];
+    if (p && String(p.status || "").toLowerCase() === "removed") violations.push(`invalid_scale_removed:${id}`);
+  }
+  for (const upd of priceUpdates) {
+    if (!productsById[upd.id]) violations.push(`unknown_price_id:${upd.id}`);
+    if (!Number.isFinite(Number(upd.newPrice)) || Number(upd.newPrice) <= 0) {
+      violations.push(`invalid_price:${upd.id}`);
+    }
+  }
+  if (plan && Array.isArray(plan.actions)) {
+    for (const action of plan.actions) {
+      const t = String(action && action.type ? action.type : "").toLowerCase();
+      if (t === "delete") violations.push("delete_not_allowed");
+      if (t && !ALLOWED_ACTIONS.includes(t)) violations.push(`action_not_allowed:${t}`);
+    }
+  }
+  return { filtered, violations };
+}
+
+function validatePlan(plan, productsById, storeConfig, systemState) {
+  if (!plan || typeof plan !== "object") {
+    return { ok: false, reason: "plan_missing_or_invalid", safePlan: null, violations: ["plan_missing_or_invalid"] };
+  }
+  if (systemState && systemState.circuitBreaker && systemState.circuitBreaker.tripped) {
+    return { ok: false, reason: "system_in_error_state", safePlan: null, violations: ["system_in_error_state"] };
+  }
+  const filteredResult = filterUnsafeActions(plan, productsById);
+  const violations = [...filteredResult.violations];
+  const safePlan = filteredResult.filtered;
+  const allIds = new Set();
+  for (const id of safePlan.removeProductIds || []) {
+    if (allIds.has(`remove:${id}`)) violations.push(`duplicate_remove:${id}`);
+    allIds.add(`remove:${id}`);
+  }
+  for (const id of safePlan.scaleProductIds || []) {
+    if (allIds.has(`scale:${id}`)) violations.push(`duplicate_scale:${id}`);
+    allIds.add(`scale:${id}`);
+  }
+  for (const p of safePlan.priceUpdates || []) {
+    if (allIds.has(`price:${p.id}`)) violations.push(`duplicate_price:${p.id}`);
+    allIds.add(`price:${p.id}`);
+  }
+  if ((safePlan.removeProductIds || []).length > MAX_DEACTIVATE_ACTIONS_PER_CYCLE) {
+    violations.push("deactivate_limit_exceeded");
+  }
+  if ((safePlan.scaleProductIds || []).length > MAX_SCALE_ACTIONS_PER_CYCLE) {
+    violations.push("scale_limit_exceeded");
+  }
+  if ((safePlan.priceUpdates || []).length > MAX_PRICE_ACTIONS_PER_CYCLE) {
+    violations.push("price_limit_exceeded");
+  }
+  const total = (safePlan.removeProductIds || []).length + (safePlan.scaleProductIds || []).length + (safePlan.priceUpdates || []).length;
+  if (total > MAX_ACTIONS_PER_CYCLE) {
+    violations.push("max_actions_exceeded");
+  }
+  if (violations.length) {
+    return { ok: false, reason: "plan_validation_failed", safePlan: null, violations };
+  }
+  return { ok: true, reason: "ok", safePlan, violations: [] };
+}
+
+function pickDeterministicDeactivateCandidates(products, count) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  if (n <= 0) return [];
+  const pool = [...(products || [])]
+    .filter((p) => p && p.id && String(p.status || "").toLowerCase() !== "removed" && String(p.status || "").toLowerCase() !== "inactive")
+    .sort((a, b) => {
+      const scoreA = Number(a.score) || 0;
+      const scoreB = Number(b.score) || 0;
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  return pool.slice(0, n).map((p) => String(p.id));
+}
+
+function buildTargetStatePlan(products, storeConfig) {
+  const activeCount = countShopfrontCatalogProducts(products);
+  const inactiveCount = (products || []).filter((p) => String(p.status || "").toLowerCase() === "inactive").length;
+  const configuredTarget = Number(storeConfig && storeConfig.maxCatalogProducts) || DEFAULT_TARGET_ACTIVE_PRODUCTS;
+  const targetActive = Math.max(1, configuredTarget);
+  const targetMaxInactive = DEFAULT_TARGET_MAX_INACTIVE;
+  const needCreate = Math.max(0, targetActive - activeCount);
+  const needDeactivate = Math.max(0, activeCount - targetActive);
+  const deactivateBudget = Math.max(0, targetMaxInactive - inactiveCount);
+  const deactivateCount = Math.min(needDeactivate, deactivateBudget, MAX_DEACTIVATE_ACTIONS_PER_CYCLE);
+  return {
+    targetActive,
+    targetMaxInactive,
+    activeCount,
+    inactiveCount,
+    plan: {
+      addProducts: needCreate,
+      removeProductIds: pickDeterministicDeactivateCandidates(products, deactivateCount),
+    },
+  };
+}
+
+function buildExecutionQueueFromPlan(plan) {
+  const queue = [];
+  const removeIds = deterministicUniqueSortedIds(plan && plan.removeProductIds);
+  const scaleIds = deterministicUniqueSortedIds(plan && plan.scaleProductIds);
+  const priceUpdates = deterministicPriceAdjustments(plan && (plan.priceUpdates || plan.priceAdjustments));
+  for (const id of removeIds) queue.push({ type: "deactivate", priority: 1, id });
+  for (const id of scaleIds) queue.push({ type: "update", operation: "scale", priority: 2, id });
+  for (const update of priceUpdates) {
+    queue.push({ type: "update", operation: "price", priority: 3, id: update.id, newPrice: update.newPrice });
+  }
+  return queue.sort((a, b) => (a.priority - b.priority) || a.id.localeCompare(b.id));
+}
+
+function validateExecutionQueue(queue, productsById, systemState) {
+  const violations = [];
+  const accepted = [];
+  if (systemState && systemState.circuitBreaker && systemState.circuitBreaker.tripped) {
+    return { accepted: [], violations: ["system_in_error_state"], counts: { total: 0, deactivate: 0, scale: 0, price: 0 } };
+  }
+  const seen = new Set();
+  let deactivates = 0, scales = 0, prices = 0;
+  for (const action of queue || []) {
+    if (!action || !action.type) {
+      violations.push("invalid_action_shape");
+      continue;
+    }
+    if (String(action.type).toLowerCase() === "delete") {
+      violations.push("delete_not_allowed");
+      continue;
+    }
+    if (!ALLOWED_ACTIONS.includes(action.type)) {
+      violations.push(`action_not_allowed:${String(action.type)}`);
+      continue;
+    }
+    if (!action.id || !productsById[action.id]) {
+      violations.push(`unknown_id:${String(action.id || "")}`);
+      continue;
+    }
+    const dupKey = `${action.type}:${action.operation || ""}:${action.id}`;
+    if (seen.has(dupKey)) {
+      violations.push(`duplicate_action:${dupKey}`);
+      continue;
+    }
+    seen.add(dupKey);
+    if (action.type === "deactivate") deactivates += 1;
+    if (action.type === "update" && action.operation === "scale") scales += 1;
+    if (action.type === "update" && action.operation === "price") prices += 1;
+    accepted.push(action);
+  }
+  if (accepted.length > MAX_ACTIONS_PER_CYCLE) violations.push("max_actions_exceeded");
+  if (deactivates > MAX_DEACTIVATE_ACTIONS_PER_CYCLE) violations.push("deactivate_limit_exceeded");
+  if (scales > MAX_SCALE_ACTIONS_PER_CYCLE) violations.push("scale_limit_exceeded");
+  if (prices > MAX_PRICE_ACTIONS_PER_CYCLE) violations.push("price_limit_exceeded");
+  for (const action of accepted) {
+    if (action.type === "deactivate") {
+      const p = productsById[action.id];
+      if (!p || String(p.status || "").toLowerCase() === "removed") violations.push(`invalid_deactivate:${action.id}`);
+    }
+    if (action.type === "update" && action.operation === "price") {
+      const np = Number(action.newPrice);
+      if (!Number.isFinite(np) || np <= 0) violations.push(`invalid_price:${action.id}`);
+    }
+    if (action.type === "update" && !["scale", "price"].includes(String(action.operation || "").toLowerCase())) {
+      violations.push(`invalid_update_operation:${action.id}`);
+    }
+  }
+  if (violations.length) {
+    return {
+      accepted: [],
+      violations,
+      counts: { total: 0, deactivate: 0, scale: 0, price: 0 },
+    };
+  }
+  return {
+    accepted,
+    violations,
+    counts: { total: accepted.length, deactivate: deactivates, scale: scales, price: prices },
   };
 }
 
@@ -486,20 +756,37 @@ async function applyPlan(supabase, plan, productsById, cycleId) {
   const nowIso = new Date().toISOString();
   const cooldownDays = Math.max(1, Number(process.env.REMOVE_COOLDOWN_DAYS) || 14);
   const cooldownUntil = new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toISOString();
-
-  const removeIds = [...new Set(plan.removeIds || [])];
-  const scaleIds = [...new Set(plan.scaleIds || [])];
-
-  if (removeIds.length) {
-    const { data: removedRows } = await supabase
-      .from("products")
-      .update({ status: "removed", cooldown_until: cooldownUntil, updated_at: nowIso })
-      .in("id", removeIds)
-      .neq("status", "removed")
-      .select("id, name");
-    for (const p of removedRows || []) {
-      decisions.push({ type: "remove", id: p.id, name: p.name });
-      const prev = productsById[p.id] || {};
+  const dryRun = Boolean(plan && plan.__dryRun);
+  const queue = buildExecutionQueueFromPlan(plan);
+  const validated = validateExecutionQueue(queue, productsById, state);
+  if (validated.violations.length) {
+    await logAi(supabase, "plan_validated_with_limits", {
+      cycleId,
+      violations: validated.violations,
+      queueRequested: queue.length,
+      queueAccepted: validated.accepted.length,
+      hardLimits: getAutomationState().hardLimits,
+    });
+    return [];
+  }
+  for (const action of validated.accepted) {
+    if (action.type === "delete") {
+      throw new Error("DELETE NOT ALLOWED");
+    }
+    if (action.type === "deactivate") {
+      const prev = productsById[action.id];
+      if (!prev || prev.status === "inactive" || prev.status === "removed") continue;
+      if (dryRun) {
+        decisions.push({ type: "deactivate", id: prev.id, name: prev.name, dryRun: true });
+        continue;
+      }
+      const { data: row } = await supabase
+        .from("products")
+        .update({ status: "inactive", cooldown_until: cooldownUntil, updated_at: nowIso })
+        .eq("id", action.id)
+        .select("id, name")
+        .maybeSingle();
+      if (!row) continue;
       const profitImpact = Number(
         (
           -Math.max(
@@ -509,20 +796,21 @@ async function applyPlan(supabase, plan, productsById, cycleId) {
           )
         ).toFixed(2)
       );
+      decisions.push({ type: "deactivate", id: row.id, name: row.name });
       await logProductTransition(supabase, {
-        product_id: p.id,
+        product_id: row.id,
         from_status: prev.status || null,
-        to_status: "removed",
+        to_status: "inactive",
         from_sourcing: prev.sourcing_status || null,
         to_sourcing: prev.sourcing_status || null,
-        reason: "automation_plan_remove",
-        actor_type: "automation",
+        reason: "automation_plan_deactivate",
+        actor_type: "automation_worker",
         cycle_id: cycleId,
       });
-      await logAi(supabase, "product_removed", {
-        id: p.id,
-        name: p.name,
-        product_id: p.id,
+      await logAi(supabase, "product_deactivated", {
+        id: row.id,
+        name: row.name,
+        product_id: row.id,
         cycleId,
         reason: "low conversion + low margin",
         profit_impact: profitImpact,
@@ -530,29 +818,32 @@ async function applyPlan(supabase, plan, productsById, cycleId) {
       });
       await recordDecision(supabase, {
         cycle_id: cycleId,
-        decision_type: "remove",
-        product_id: p.id,
+        decision_type: "deactivate",
+        product_id: row.id,
         category: prev.category || null,
         source_name: prev.source_name || prev.source_platform || null,
-        hypothesis: "Removing low-performance SKU should lift portfolio profitability.",
+        hypothesis: "Deactivating low-performance SKU should lift portfolio profitability safely.",
         expected_effect: "higher margin quality",
         confidence: 0.7,
         before_state: { status: prev.status, sourcing_status: prev.sourcing_status, score: prev.score, price: prev.price },
-        after_state: { status: "removed", cooldown_until: cooldownUntil, profit_impact: profitImpact },
+        after_state: { status: "inactive", cooldown_until: cooldownUntil, profit_impact: profitImpact },
       });
+      continue;
     }
-  }
-
-  if (scaleIds.length) {
-    const { data: scaledRows } = await supabase
-      .from("products")
-      .update({ status: "scaling", updated_at: nowIso })
-      .in("id", scaleIds)
-      .neq("status", "removed")
-      .select("id, name");
-    for (const p of scaledRows || []) {
-      decisions.push({ type: "scale", id: p.id, name: p.name });
-      const prev = productsById[p.id] || {};
+    if (action.type === "update" && action.operation === "scale") {
+      const prev = productsById[action.id];
+      if (!prev || prev.status === "removed") continue;
+      if (dryRun) {
+        decisions.push({ type: "scale", id: prev.id, name: prev.name, dryRun: true });
+        continue;
+      }
+      const { data: row } = await supabase
+        .from("products")
+        .update({ status: "scaling", updated_at: nowIso })
+        .eq("id", action.id)
+        .select("id, name")
+        .maybeSingle();
+      if (!row) continue;
       const profitImpact = Number(
         (
           Math.max(
@@ -563,20 +854,21 @@ async function applyPlan(supabase, plan, productsById, cycleId) {
           )
         ).toFixed(2)
       );
+      decisions.push({ type: "scale", id: row.id, name: row.name });
       await logProductTransition(supabase, {
-        product_id: p.id,
+        product_id: row.id,
         from_status: prev.status || null,
         to_status: "scaling",
         from_sourcing: prev.sourcing_status || null,
         to_sourcing: prev.sourcing_status || null,
         reason: "automation_plan_scale",
-        actor_type: "automation",
+        actor_type: "automation_worker",
         cycle_id: cycleId,
       });
       await logAi(supabase, "product_scaled", {
-        id: p.id,
-        name: p.name,
-        product_id: p.id,
+        id: row.id,
+        name: row.name,
+        product_id: row.id,
         cycleId,
         reason: "high demand + strong unit profit",
         profit_impact: profitImpact,
@@ -584,7 +876,7 @@ async function applyPlan(supabase, plan, productsById, cycleId) {
       await recordDecision(supabase, {
         cycle_id: cycleId,
         decision_type: "scale",
-        product_id: p.id,
+        product_id: row.id,
         category: prev.category || null,
         source_name: prev.source_name || prev.source_platform || null,
         hypothesis: "Scaling high confidence SKU should increase conversion and profit.",
@@ -593,55 +885,51 @@ async function applyPlan(supabase, plan, productsById, cycleId) {
         before_state: { status: prev.status, score: prev.score, confidence: prev.confidence_score },
         after_state: { status: "scaling", profit_impact: profitImpact },
       });
+      continue;
     }
-  }
-
-  const priceRows = [];
-  for (const adj of plan.priceAdjustments || []) {
-    if (!adj.id || adj.newPrice == null) continue;
-    const p = productsById[adj.id];
-    if (!p) continue;
-    const oldPrice = Number(p.price);
-    const parsedPrice = Number(adj.newPrice);
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) continue;
-    const np = Math.max(29, parsedPrice);
-    priceRows.push({ id: adj.id, price: np, updated_at: nowIso });
-    decisions.push({ type: "price", id: adj.id, name: p.name, oldPrice, newPrice: np });
-    await recordPriceElasticityChange(supabase, p, oldPrice, np, cycleId);
-    const oldUnitProfit = Number(
-      (oldPrice - (Number(p.cost) || 0) - (Number(p.estimated_shipping_cost) || 0) - (Number(p.return_risk_proxy) || 0)).toFixed(2)
-    );
-    const newUnitProfit = Number(
-      (np - (Number(p.cost) || 0) - (Number(p.estimated_shipping_cost) || 0) - (Number(p.return_risk_proxy) || 0)).toFixed(2)
-    );
-    const profitImpact = Number((newUnitProfit - oldUnitProfit).toFixed(2));
-    await logAi(supabase, "price_updated", {
-      id: adj.id,
-      name: p.name,
-      product_id: adj.id,
-      oldPrice,
-      newPrice: np,
-      cycleId,
-      reason: "price optimization with margin floor",
-      profit_impact: profitImpact,
-    });
-    await recordDecision(supabase, {
-      cycle_id: cycleId,
-      decision_type: "price",
-      product_id: adj.id,
-      category: p.category || null,
-      source_name: p.source_name || p.source_platform || null,
-      hypothesis: "Price update should improve profit per view without harming conversion.",
-      expected_effect: "profit uplift",
-      confidence: 0.62,
-      before_state: { price: oldPrice, conversion: (Number(p.orders_count) || 0) / Math.max(Number(p.views) || 0, 1) },
+    if (action.type === "update" && action.operation === "price") {
+      const p = productsById[action.id];
+      if (!p) continue;
+      const oldPrice = Number(p.price);
+      const parsedPrice = Number(action.newPrice);
+      if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) continue;
+      const np = Math.max(29, parsedPrice);
+      if (dryRun) {
+        decisions.push({ type: "price", id: action.id, name: p.name, oldPrice, newPrice: np, dryRun: true });
+        continue;
+      }
+      await supabase.from("products").upsert([{ id: action.id, price: np, updated_at: nowIso }], { onConflict: "id" });
+      decisions.push({ type: "price", id: action.id, name: p.name, oldPrice, newPrice: np });
+      await recordPriceElasticityChange(supabase, p, oldPrice, np, cycleId);
+      const oldUnitProfit = Number(
+        (oldPrice - (Number(p.cost) || 0) - (Number(p.estimated_shipping_cost) || 0) - (Number(p.return_risk_proxy) || 0)).toFixed(2)
+      );
+      const newUnitProfit = Number(
+        (np - (Number(p.cost) || 0) - (Number(p.estimated_shipping_cost) || 0) - (Number(p.return_risk_proxy) || 0)).toFixed(2)
+      );
+      const profitImpact = Number((newUnitProfit - oldUnitProfit).toFixed(2));
+      await logAi(supabase, "price_updated", {
+        id: action.id,
+        name: p.name,
+        product_id: action.id,
+        oldPrice,
+        newPrice: np,
+        cycleId,
+        reason: "price optimization with margin floor",
+        profit_impact: profitImpact,
+      });
+      await recordDecision(supabase, {
+        cycle_id: cycleId,
+        decision_type: "price",
+        product_id: action.id,
+        category: p.category || null,
+        source_name: p.source_name || p.source_platform || null,
+        hypothesis: "Price update should improve profit per view without harming conversion.",
+        expected_effect: "profit uplift",
+        confidence: 0.62,
+        before_state: { price: oldPrice, conversion: (Number(p.orders_count) || 0) / Math.max(Number(p.views) || 0, 1) },
         after_state: { price: np, unit_profit: newUnitProfit, profit_impact: profitImpact },
-    });
-  }
-  if (priceRows.length) {
-    const chunkSize = 75;
-    for (let i = 0; i < priceRows.length; i += chunkSize) {
-      await supabase.from("products").upsert(priceRows.slice(i, i + chunkSize), { onConflict: "id" });
+      });
     }
   }
 
@@ -2144,6 +2432,19 @@ async function buildPerformanceSummary(supabase) {
   };
 }
 
+function buildPerformanceSummaryFromProducts(products) {
+  const rows = (products || []).filter((p) => p && p.id && p.status !== "removed");
+  if (!rows.length) return { activeCount: 0, avgScore: 0, topProduct: null };
+  const scores = rows.map((p) => Number(p.score) || 0);
+  const avgScore = scores.reduce((a, b) => a + b, 0) / Math.max(1, scores.length);
+  const top = [...rows].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))[0];
+  return {
+    activeCount: rows.length,
+    avgScore: Math.round(avgScore * 100) / 100,
+    topProduct: top ? { id: top.id, name: top.name, score: Number(top.score) || 0 } : null,
+  };
+}
+
 async function enrichContentForProducts(supabase, ids, cycleId) {
   const uniq = [...new Set(ids || [])];
   for (const id of uniq) {
@@ -2176,6 +2477,7 @@ async function runAutomationCycle(supabase, opts = {}) {
   }
   if (state.running) return;
   const ceoMode = normalizeCeoCycleMode(opts && opts.mode);
+  const dryRun = Boolean(opts && opts.dryRun);
   state.running = true;
   state.lastError = null;
   state.productsAddedLastRun = 0;
@@ -2189,6 +2491,10 @@ async function runAutomationCycle(supabase, opts = {}) {
   let rollbackSnapshot = [];
 
   try {
+    if (state.circuitBreaker.tripped) {
+      state.lastError = `Circuit breaker active: ${state.circuitBreaker.reason || "manual reset required"}`;
+      return;
+    }
     if (!supabase) {
       state.lastError = "Supabase not configured";
       return;
@@ -2250,6 +2556,7 @@ async function runAutomationCycle(supabase, opts = {}) {
 
     const memories = await loadMemories(supabase);
     const shopReadyBeforePlan = countShopfrontCatalogProducts(products);
+    await logAi(supabase, "ceo_phase_read", { cycleId, phase: "READ" });
     const plan = await decideWithGemini({
       products,
       memories,
@@ -2281,7 +2588,8 @@ async function runAutomationCycle(supabase, opts = {}) {
       scaleCount: Array.isArray(plan && plan.scaleProductIds) ? plan.scaleProductIds.length : 0,
       priceCount: Array.isArray(plan && plan.priceUpdates) ? plan.priceUpdates.length : 0,
     });
-    const safePlan = enforceBusinessRules(plan, products);
+    await logAi(supabase, "ceo_phase_plan", { cycleId, phase: "PLAN" });
+    const rulePlan = createDeterministicPlan(enforceBusinessRules(plan, products));
     const elasticityByCategory = {};
     const cats = [...new Set(products.map((p) => String(p.category || "other")))];
     for (const c of cats) {
@@ -2293,15 +2601,53 @@ async function runAutomationCycle(supabase, opts = {}) {
       targetMargin: storeConfig.targetMargin,
       priceRange: storeConfig.priceRange,
     });
-    safePlan.priceUpdates = [...(safePlan.priceUpdates || []), ...strategyUpdates];
-    safePlan.priceAdjustments = safePlan.priceUpdates;
+    rulePlan.priceUpdates = deterministicPriceAdjustments([...(rulePlan.priceUpdates || []), ...strategyUpdates]);
+    rulePlan.priceAdjustments = rulePlan.priceUpdates;
     const adaptMult = await loadRiskAdaptMultiplier(supabase);
     Object.assign(
-      safePlan,
-      enforceRiskCapsOnPlan(safePlan, products, storeConfig.strategy && storeConfig.strategy.risk, {
+      rulePlan,
+      enforceRiskCapsOnPlan(rulePlan, products, storeConfig.strategy && storeConfig.strategy.risk, {
         adaptMultiplier: adaptMult,
       })
     );
+    const targetState = buildTargetStatePlan(products, storeConfig);
+    const preValidatedPlan = createDeterministicPlan({
+      ...rulePlan,
+      addProducts: Math.max(Number(rulePlan.addProducts) || 0, Number(targetState.plan.addProducts) || 0),
+      removeProductIds: deterministicUniqueSortedIds([
+        ...(rulePlan.removeProductIds || []),
+        ...(targetState.plan.removeProductIds || []),
+      ]),
+    });
+    await logAi(supabase, "ceo_plan_raw", {
+      cycleId,
+      dryRun,
+      plan: preValidatedPlan,
+      targetState: {
+        targetActive: targetState.targetActive,
+        targetMaxInactive: targetState.targetMaxInactive,
+        activeCount: targetState.activeCount,
+        inactiveCount: targetState.inactiveCount,
+      },
+    });
+    const validatedPlan = validatePlan(preValidatedPlan, Object.fromEntries(products.map((p) => [p.id, p])), storeConfig, state);
+    if (!validatedPlan.ok) {
+      state.lastPlan = null;
+      await logAi(supabase, "ceo_plan_rejected", {
+        cycleId,
+        dryRun,
+        reason: validatedPlan.reason,
+        violations: validatedPlan.violations,
+      });
+      return;
+    }
+    const safePlan = validatedPlan.safePlan;
+    await logAi(supabase, "ceo_plan_validated", {
+      cycleId,
+      dryRun,
+      safePlan,
+      validation: { ok: true, violations: [] },
+    });
     const sourceMetricsMap = await loadSourceMetricsMap(supabase);
     for (const [srcName, srcMetric] of sourceMetricsMap.entries()) {
       const w = sourceDiscoveryWeight(srcMetric);
@@ -2317,6 +2663,7 @@ async function runAutomationCycle(supabase, opts = {}) {
         after_state: { discovery_weight: w },
       });
     }
+    await logAi(supabase, "ceo_phase_validate", { cycleId, phase: "VALIDATE" });
     state.lastPlan = {
       removeProductIds: safePlan.removeProductIds,
       scaleProductIds: safePlan.scaleProductIds,
@@ -2378,12 +2725,13 @@ async function runAutomationCycle(supabase, opts = {}) {
       ...(safePlan.priceUpdates || []).map((x) => x.id),
     ];
     rollbackSnapshot = await snapshotProducts(supabase, affectedIds);
-    const applied = await applyPlan(supabase, safePlan, byId, cycleId);
+    await logAi(supabase, "ceo_phase_execute", { cycleId, phase: "EXECUTE" });
+    const applied = await applyPlan(supabase, { ...safePlan, __dryRun: dryRun }, byId, cycleId);
     logger.info("automation.cycle.db_writes_applied", { cycleId, appliedCount: applied.length });
     state.decisionsLastRun = applied;
-    state.productsRemovedLastRun = applied.filter((d) => d.type === "remove").length;
+    state.productsRemovedLastRun = applied.filter((d) => d.type === "deactivate").length;
 
-    const activeCount = countShopfrontCatalogProducts(await loadProducts(supabase));
+    const activeCount = dryRun ? countShopfrontCatalogProducts(products) : countShopfrontCatalogProducts(await loadProducts(supabase));
     const aiAddsRaw = safePlan.addCount != null ? safePlan.addCount : safePlan.addProducts;
     let targetAdds = desiredNewImportCount(activeCount, aiAddsRaw, storeConfig.maxCatalogProducts);
     if (ceoMode === "light") {
@@ -2395,7 +2743,7 @@ async function runAutomationCycle(supabase, opts = {}) {
       };
       logger.info("automation.cycle.discovery_skipped", { cycleId, ceoMode });
     }
-    if (targetAdds > 0) {
+    if (targetAdds > 0 && !dryRun) {
       const sourcingStoreConfig = await getStoreConfig(supabase);
       const sourcingRunId = randomUUID();
       const discoveryLog = makeDiscoveryLogger(supabase, cycleId);
@@ -2431,16 +2779,18 @@ async function runAutomationCycle(supabase, opts = {}) {
     }
 
     const contentIds = [...new Set([...(safePlan.contentProductIds || []), ...(safePlan.promoteProductIds || [])])];
-    if (contentIds.length) await enrichContentForProducts(supabase, contentIds, cycleId);
+    if (!dryRun && contentIds.length) await enrichContentForProducts(supabase, contentIds, cycleId);
 
-    await saveMemories(supabase, safePlan.insights);
-    state.performanceSummary = await buildPerformanceSummary(supabase);
-    const productsAfter = await loadProducts(supabase);
-    await backfillElasticityOutcomes(supabase, Object.fromEntries(productsAfter.map((p) => [p.id, p])));
-    await recordDailyMetrics(supabase, productsAfter);
-    await recordLearningMetrics(supabase, productsAfter);
-    await updateSourceMetrics(supabase, productsAfter);
-    await rebuildCategoryLearning(supabase, productsAfter);
+    if (!dryRun) await saveMemories(supabase, safePlan.insights);
+    state.performanceSummary = dryRun ? buildPerformanceSummaryFromProducts(products) : await buildPerformanceSummary(supabase);
+    const productsAfter = dryRun ? products : await loadProducts(supabase);
+    if (!dryRun) {
+      await backfillElasticityOutcomes(supabase, Object.fromEntries(productsAfter.map((p) => [p.id, p])));
+      await recordDailyMetrics(supabase, productsAfter);
+      await recordLearningMetrics(supabase, productsAfter);
+      await updateSourceMetrics(supabase, productsAfter);
+      await rebuildCategoryLearning(supabase, productsAfter);
+    }
     const afterMetrics = computeStoreMetrics(productsAfter);
     const profitDelta = evaluateDelta(businessMetrics, afterMetrics);
     const attributionResultsComputed = attributeCycleOutcome(businessMetrics, afterMetrics, applied);
@@ -2501,9 +2851,11 @@ async function runAutomationCycle(supabase, opts = {}) {
       });
     }
 
+    await logAi(supabase, "ceo_phase_log", { cycleId, phase: "LOG" });
     await logAi(supabase, "cycle_complete", {
       cycleId,
-      removeProductIds: (safePlan.removeProductIds || []).length,
+      dryRun,
+      deactivateProductIds: (safePlan.removeProductIds || []).length,
       scaleProductIds: (safePlan.scaleProductIds || []).length,
       priceUpdates: (safePlan.priceUpdates || []).length,
       addProducts: safePlan.addProducts,
@@ -2511,8 +2863,28 @@ async function runAutomationCycle(supabase, opts = {}) {
       inserted: state.productsAddedLastRun,
       insights: (safePlan.insights || []).length,
     });
+    await logAi(supabase, "ceo_execution_audit", {
+      cycleId,
+      dryRun,
+      executedActions: applied,
+      validation: { ok: true },
+      targetState: buildTargetStatePlan(productsAfter, storeConfig),
+    });
+    await logAi(supabase, "ceo_phase_pause", {
+      cycleId,
+      phase: "PAUSE",
+      nextCycleInMs: CEO_INTERVAL_MS,
+    });
+    state.circuitBreaker.errorStreak = 0;
   } catch (e) {
     state.lastError = e.message || String(e);
+    state.circuitBreaker.errorStreak = Number(state.circuitBreaker.errorStreak || 0) + 1;
+    if (state.circuitBreaker.errorStreak >= CEO_ERROR_STREAK_LIMIT) {
+      state.circuitBreaker.tripped = true;
+      state.circuitBreaker.reason = state.lastError;
+      state.circuitBreaker.trippedAt = new Date().toISOString();
+      ceoAutomationPaused = true;
+    }
     logger.error("automation.cycle.error", {
       cycleId,
       error: state.lastError,
@@ -3008,6 +3380,7 @@ module.exports = {
   getAutomationState,
   setCeoAutomationPaused,
   isCeoAutomationPaused,
+  resetAutomationCircuitBreaker,
   CEO_INTERVAL_MS,
   SOURCING_INTERVAL_MS,
 };

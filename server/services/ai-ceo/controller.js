@@ -50,6 +50,7 @@ async function runAiCeoCycle({ supabase, dryRun = false, mode = "full" } = {}) {
     ...(out.summary || {}),
     mode,
     discoverySkipped,
+    deactivatedCount: out.summary.execution.productsRemovedLastRun || 0,
     removedCount: out.summary.execution.productsRemovedLastRun || 0,
     addedCount: out.summary.execution.productsAddedLastRun || 0,
     priceChanges: (out.summary.execution.decisionsApplied || 0),
@@ -65,6 +66,7 @@ async function runAiCeoCycle({ supabase, dryRun = false, mode = "full" } = {}) {
         summary: {
           mode,
           discoverySkipped: out.summary.discoverySkipped,
+          deactivatedCount: out.summary.deactivatedCount,
           removedCount: out.summary.removedCount,
           addedCount: out.summary.addedCount,
           priceChanges: out.summary.priceChanges,
