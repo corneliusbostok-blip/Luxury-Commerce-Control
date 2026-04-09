@@ -31,9 +31,10 @@ import { initBotAssistant } from "./bot-assistant.js";
 import { initSeoPage } from "./seo-page.js";
 
 /** Fuld katalog / log / KPI fra serveren */
-const FULL_REFRESH_MS = 8000;
+const FULL_REFRESH_MS = 20000;
 /** Kun motorstatus (billigt — ingen DB) */
 const PULSE_MS = 4000;
+const FULFILLMENT_PANEL_REFRESH_MS = 15000;
 const panelErr = document.getElementById("err-banner");
 
 let catalogNormalized = [];
@@ -46,6 +47,8 @@ let lastAiFeedRows = [];
 let selectedSourcingRunId = null;
 let aiFaceBubbleTimer = null;
 let trashViewEnabled = false;
+let summaryLoadInFlight = false;
+let summaryReloadQueued = false;
 const apiClient = (window.VeldenApiClient && window.VeldenApiClient.request) || null;
 const reportUnauthorized =
   (typeof window !== "undefined" && window.VeldenUnauthorized && window.VeldenUnauthorized.report) ||
@@ -73,7 +76,7 @@ function adminApiFailureText(data, fallback) {
 }
 
 async function apiRequest(url, options) {
-  const opts = Object.assign({ credentials: "include" }, options || {});
+  const opts = Object.assign({ credentials: "include", cache: "no-store" }, options || {});
   if (apiClient) {
     const r = await apiClient(url, opts);
     if (r.status === 401) {
@@ -370,7 +373,16 @@ function closeModal() {
 }
 
 function applyFiltersAndRender() {
-  renderCatalogRows(filterRows(catalogNormalized), catalogNormalized, scaleIdSet, wireRowActions);
+  const filtered = filterRows(catalogNormalized);
+  if (!filtered.length && !trashViewEnabled) {
+    // Safety fallback: if filters/logic temporarily zero out rows, still show non-removed products.
+    const nonRemoved = catalogNormalized.filter((p) => p && p.opsStatus !== "removed");
+    if (nonRemoved.length) {
+      renderCatalogRows(nonRemoved, catalogNormalized, scaleIdSet, wireRowActions);
+      return;
+    }
+  }
+  renderCatalogRows(filtered, catalogNormalized, scaleIdSet, wireRowActions);
 }
 
 function fmtMoneyCents(cents, currency) {
@@ -789,6 +801,7 @@ function renderFullSummary(data) {
       panelErr.style.display = "block";
     }
     refreshFulfillmentInbox(false).catch(() => {});
+    refreshFulfillmentPanel().catch(() => {});
     return;
   }
 
@@ -1559,34 +1572,31 @@ function humanizeAiEntry(row) {
 function renderSinceLastVisit(data) {
   const host = document.getElementById("since-last-visit");
   if (!host) return;
-  const key = "velden_admin_last_visit_snapshot";
-  const current = {
-    added: Number(data && data.ai && data.ai.productsAddedLastRun ? data.ai.productsAddedLastRun : 0),
-    removed: Number(data && data.ai && data.ai.productsRemovedLastRun ? data.ai.productsRemovedLastRun : 0),
-    profit: Number(data && data.businessMetrics && data.businessMetrics.totalProfit ? data.businessMetrics.totalProfit : 0),
-  };
-  let prev = null;
-  try {
-    prev = JSON.parse(localStorage.getItem(key) || "null");
-  } catch {
-    prev = null;
-  }
-  const profitDelta = prev ? current.profit - Number(prev.profit || 0) : 0;
+  const trends = Array.isArray(data && data.trends7d) ? data.trends7d : [];
+  const last24h = trends.length
+    ? trends
+        .slice()
+        .sort((a, b) => new Date(String(b?.date || 0)).getTime() - new Date(String(a?.date || 0)).getTime())[0]
+    : null;
+  const profit24h = last24h && last24h.profit != null
+    ? Number(last24h.profit)
+    : Number(data && data.businessMetrics && data.businessMetrics.totalProfit ? data.businessMetrics.totalProfit : 0);
+  const ordersTotal = Number(data && data.catalogMetrics && data.catalogMetrics.totalOrders ? data.catalogMetrics.totalOrders : 0);
+  const added = Number(data && data.ai && data.ai.productsAddedLastRun ? data.ai.productsAddedLastRun : 0);
+  const removed = Number(data && data.ai && data.ai.productsRemovedLastRun ? data.ai.productsRemovedLastRun : 0);
   host.innerHTML =
     '<div class="adm-top-status-card"><p class="adm-top-status-label">Products added</p><p class="adm-top-status-value">' +
-    esc(String(current.added)) +
+    esc(String(added)) +
     "</p></div>" +
     '<div class="adm-top-status-card"><p class="adm-top-status-label">Products removed</p><p class="adm-top-status-value">' +
-    esc(String(current.removed)) +
+    esc(String(removed)) +
     "</p></div>" +
-    '<div class="adm-top-status-card"><p class="adm-top-status-label">Profit change</p><p class="adm-top-status-value">' +
-    esc((profitDelta >= 0 ? "+" : "") + profitDelta.toFixed(0)) +
+    '<div class="adm-top-status-card"><p class="adm-top-status-label">Profit 24h</p><p class="adm-top-status-value">' +
+    esc(fmtCatalogPrice(profit24h)) +
+    "</p></div>" +
+    '<div class="adm-top-status-card"><p class="adm-top-status-label">Orders</p><p class="adm-top-status-value">' +
+    esc(String(Math.max(0, Math.round(ordersTotal)))) +
     "</p></div>";
-  try {
-    localStorage.setItem(key, JSON.stringify(current));
-  } catch {
-    /* ignore */
-  }
 }
 
 function renderInsights(data, ai) {
@@ -1597,8 +1607,11 @@ function renderInsights(data, ai) {
   planInsights.slice(0, 3).forEach((txt) => insights.push(String(txt)));
   const trends = Array.isArray(data && data.trends7d) ? data.trends7d : [];
   if (trends.length >= 2) {
-    const first = trends[0];
-    const last = trends[trends.length - 1];
+    const byDateAsc = trends
+      .slice()
+      .sort((a, b) => new Date(String(a?.date || 0)).getTime() - new Date(String(b?.date || 0)).getTime());
+    const first = byDateAsc[0];
+    const last = byDateAsc[byDateAsc.length - 1];
     if (Number(last.profit || 0) > Number(first.profit || 0)) insights.push("Profit trend is improving over the last week");
     if (Number(last.avg_margin || 0) > Number(first.avg_margin || 0)) insights.push("Margins are improving in recent cycles");
   }
@@ -1708,18 +1721,24 @@ function applyEnginePulse(d) {
 function pulseEngine() {
   if (location.protocol === "file:") return;
   if (!lastSnapshot || !lastSnapshot.ok) return;
-  fetch("/api/admin/pulse", { headers: adminHeaders({ json: false }), credentials: "include" })
+  fetch("/api/admin/pulse", { headers: adminHeaders({ json: false }), credentials: "include", cache: "no-store" })
     .then((r) => r.json())
     .then(applyEnginePulse)
     .catch(() => {});
 }
 
 function load() {
+  if (summaryLoadInFlight) {
+    summaryReloadQueued = true;
+    return Promise.resolve(lastSnapshot || null);
+  }
+  summaryLoadInFlight = true;
   if (location.protocol === "file:") {
     if (panelErr) {
       panelErr.textContent = "Open via server: http://localhost:3000/admin";
       panelErr.style.display = "block";
     }
+    summaryLoadInFlight = false;
     return Promise.resolve();
   }
   if (panelErr) panelErr.style.display = "none";
@@ -1742,11 +1761,24 @@ function load() {
         panelErr.textContent = "Could not reach /api/admin/summary — is the server running?";
         panelErr.style.display = "block";
       }
+      if (lastSnapshot && lastSnapshot.ok) {
+        renderFullSummary(lastSnapshot);
+      }
       const dot = document.getElementById("ops-pulse-dot");
       const lab = document.getElementById("ops-pulse-label");
       if (dot) dot.className = "adm-dot adm-dot--idle";
       if (lab) lab.textContent = "—";
       refreshFulfillmentInbox(false).catch(() => {});
+      refreshFulfillmentPanel().catch(() => {});
+    })
+    .finally(() => {
+      summaryLoadInFlight = false;
+      if (summaryReloadQueued) {
+        summaryReloadQueued = false;
+        setTimeout(() => {
+          load();
+        }, 0);
+      }
     });
 }
 
@@ -2797,3 +2829,6 @@ startFulfillmentInboxAutoRefresh();
 load();
 setInterval(load, FULL_REFRESH_MS);
 setInterval(pulseEngine, PULSE_MS);
+setInterval(() => {
+  refreshFulfillmentPanel().catch(() => {});
+}, FULFILLMENT_PANEL_REFRESH_MS);

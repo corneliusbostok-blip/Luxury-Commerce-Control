@@ -164,9 +164,17 @@ export function renderKpiGrid(ai, data) {
   const p = data.products || {};
   const bm = data.businessMetrics || {};
   const trends = Array.isArray(data.trends7d) ? data.trends7d : [];
-  const last24h = trends.length ? trends[trends.length - 1] : null;
+  const last24h = trends.length
+    ? trends
+        .slice()
+        .sort((a, b) => new Date(String(b?.date || 0)).getTime() - new Date(String(a?.date || 0)).getTime())[0]
+    : null;
   const profit24h = last24h && last24h.profit != null ? Number(last24h.profit) : Number(bm.totalProfit || 0);
-  const profit7d = trends.reduce((sum, row) => sum + Number(row && row.profit ? row.profit : 0), 0);
+  const maxProfit = trends.length
+    ? trends.reduce((m, row) => Math.max(m, Number(row && row.profit ? row.profit : 0)), 0)
+    : Number(bm.totalProfit || 0);
+  const totalSales = bm.totalRevenue != null ? Number(bm.totalRevenue) : 0;
+  const orders = Number(data && data.catalogMetrics && data.catalogMetrics.totalOrders ? data.catalogMetrics.totalOrders : 0);
   const active = p.shopVisible != null ? p.shopVisible : p.active != null ? p.active : data.productCount ?? "—";
   const conversion = bm.avgConversionRate != null ? Number(bm.avgConversionRate) : 0;
   const aov = bm.AOV != null ? Number(bm.AOV) : 0;
@@ -180,10 +188,24 @@ export function renderKpiGrid(ai, data) {
       subTone: "ok",
     },
     {
-      key: "profit7d",
-      label: "Profit 7d",
-      value: fmtCatalogPrice(profit7d),
-      sub: "Rolling 7 days",
+      key: "maxProfit",
+      label: "Max profit",
+      value: fmtCatalogPrice(maxProfit),
+      sub: "Highest daily profit",
+      subTone: "muted",
+    },
+    {
+      key: "sales",
+      label: "Total salg",
+      value: fmtCatalogPrice(totalSales),
+      sub: "Total omsætning",
+      subTone: "muted",
+    },
+    {
+      key: "orders",
+      label: "Orders",
+      value: String(Math.max(0, Math.round(orders))),
+      sub: "Total orders",
       subTone: "muted",
     },
     {

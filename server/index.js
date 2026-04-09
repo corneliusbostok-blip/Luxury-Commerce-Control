@@ -34,9 +34,11 @@ const {
   extractSourcingCategoryIntent,
   sourcingCategoryIntentLabelDa,
   setCeoAutomationPaused,
+  resetAutomationCircuitBreaker,
   SOURCING_INTERVAL_MS,
   runAutomationCycle,
   runSourcingPass,
+  previewAutomationValidator,
 } = require("./automation");
 const { startAutomationWorker } = require("./services/automation-worker/runner");
 const { loadShopifyProductRows } = require("./services/shopify-import");
@@ -93,6 +95,7 @@ const {
   listPostableProducts,
   postNowForPlatform,
   runMarketingAutomationCycle,
+  backfillMarketingConnectionsFromStoreConfig,
 } = require("./services/marketing/marketing-engine");
 const {
   createOauthState,
@@ -102,6 +105,7 @@ const {
   tiktokAuthorizeUrl,
   exchangeTikTokCode,
 } = require("./services/marketing/oauth");
+const { listConnections } = require("./services/marketing/connection-store");
 const {
   listFulfillmentQueueWithPriority,
   markFulfillmentQueueCompleted,
@@ -124,6 +128,7 @@ const { verifyCartLinesInventory, verifySingleProductInventory } = require("./li
 const { detectServerlessRuntime } = require("./lib/run-mode");
 const { resolvePublicUrl } = require("./lib/public-url");
 const { runSupplierStockSync } = require("./services/supplier-sync");
+const { chooseBestProductImage } = require("./services/image-quality");
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -375,6 +380,54 @@ app.post("/api/admin/runtime/ceo-cycle", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/runtime/ceo-cycle/dry-run", requireAdmin, async (req, res) => {
+  try {
+    if (!supabase) return dbUnavailable(res);
+    const mode = String(req.body?.mode || "light").toLowerCase() === "full" ? "full" : "light";
+    await runAutomationCycle(supabase, { mode, dryRun: true });
+    const auto = getAutomationState();
+    res.json({
+      ok: true,
+      dryRun: true,
+      mode,
+      state: {
+        running: Boolean(auto.running),
+        lastRunAt: auto.lastRunAt || null,
+        lastError: auto.lastError || null,
+        decisionsLastRun: Array.isArray(auto.decisionsLastRun) ? auto.decisionsLastRun : [],
+        productsAddedLastRun: Number(auto.productsAddedLastRun) || 0,
+        productsRemovedLastRun: Number(auto.productsRemovedLastRun) || 0,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+app.post("/api/admin/runtime/circuit-breaker/reset", requireAdmin, async (_req, res) => {
+  try {
+    resetAutomationCircuitBreaker();
+    const auto = getAutomationState();
+    res.json({ ok: true, circuitBreaker: auto.circuitBreaker, ceoAutomationPaused: Boolean(auto.ceoAutomationPaused) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+app.post("/api/admin/runtime/validator-preview", requireAdmin, async (req, res) => {
+  try {
+    if (!supabase) return dbUnavailable(res);
+    const out = await previewAutomationValidator(supabase, {
+      desiredActiveProducts: req.body?.desiredActiveProducts,
+      maxInactiveProducts: req.body?.maxInactiveProducts,
+    });
+    if (!out.ok) return res.status(500).json({ ok: false, error: out.error || "Preview failed" });
+    return res.json({ ok: true, ...out.preview });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
 app.post("/api/admin/runtime/sourcing-pass", requireAdmin, async (req, res) => {
   try {
     if (!supabase) return dbUnavailable(res);
@@ -438,11 +491,14 @@ function apiOnlyMeta(name, replacements = []) {
   };
 }
 
-function buildMarketingAuthorizeUrl(platform) {
+async function buildMarketingAuthorizeUrl(platform) {
   const p = String(platform || "").toLowerCase();
   if (!["facebook", "instagram", "tiktok"].includes(p)) return { ok: false, error: "Unsupported platform" };
-  const state = createOauthState({ platform: p, createdAt: new Date().toISOString() });
-  const url = p === "tiktok" ? tiktokAuthorizeUrl({ state }) : facebookAuthorizeUrl({ platform: p, state });
+  const state = await createOauthState(supabase, { platform: p, store_id: "active", createdAt: new Date().toISOString() });
+  if (!state) return { ok: false, error: "Could not create OAuth state" };
+  const built = p === "tiktok" ? tiktokAuthorizeUrl({ state }) : facebookAuthorizeUrl({ platform: p, state });
+  if (!built || built.ok === false || !built.url) return { ok: false, error: built && built.error ? built.error : "Could not build OAuth URL" };
+  const url = built.url;
   return { ok: true, platform: p, url };
 }
 
@@ -1145,7 +1201,7 @@ app.get("/api/products", async (req, res) => {
       supabase
       .from("products")
       .select(
-          "id, name, brand, description, selling_points, price, cost, image_url, category, color, color_variants, style_key, sizes, score, status, views, clicks, orders_count, rank_state, rank_last_changed_at"
+          "id, name, brand, description, selling_points, price, cost, image_url, image_urls, category, color, color_variants, style_key, sizes, score, status, views, clicks, orders_count, rank_state, rank_last_changed_at"
         )
     );
     query = query.neq("status", "removed").order("score", { ascending: false });
@@ -1172,6 +1228,22 @@ app.get("/api/products", async (req, res) => {
         enrichProduct(p)
       );
     });
+    products = products
+      .map((p) => {
+        const imageCandidates = [
+          ...(Array.isArray(p.images) ? p.images : []),
+          String(p.image_url || ""),
+          ...(Array.isArray(p.colorVariants) ? p.colorVariants.map((v) => v && v.image_url).filter(Boolean) : []),
+        ];
+        const best = chooseBestProductImage(imageCandidates);
+        if (!best.image) return null;
+        return {
+          ...p,
+          image_url: best.image,
+          images: best.accepted.map((x) => x.url).slice(0, 20),
+        };
+      })
+      .filter(Boolean);
     const sizeQ = String(req.query.size || "").trim();
     const colorQ = String(req.query.color || "").trim();
     if (sizeQ) {
@@ -2609,6 +2681,28 @@ app.get("/api/admin/marketing/status", requireAdmin, async (_req, res) => {
   }
 });
 
+app.get("/api/admin/marketing/connections", requireAdmin, async (_req, res) => {
+  try {
+    if (!supabase) return dbUnavailable(res);
+    const rows = await listConnections(supabase, "active");
+    const safe = (rows || []).map((r) => ({
+      platform: r.platform,
+      enabled: r.enabled !== false,
+      connected: Boolean(String(r.access_token_enc || "").trim()),
+      authMethod: r.auth_method || "",
+      connectedAt: r.connected_at || "",
+      accountId: r.account_id || "",
+      pageId: r.page_id || "",
+      igUserId: r.ig_user_id || "",
+      expiresAt: r.expires_at || null,
+      hasRefreshToken: Boolean(String(r.refresh_token_enc || "").trim()),
+    }));
+    return res.json({ ok: true, connections: safe });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
 app.post("/api/admin/marketing/connect", requireAdmin, validateBody(schemas.adminMarketingConnect), async (req, res) => {
   try {
     if (!supabase) return dbUnavailable(res);
@@ -2645,9 +2739,29 @@ app.post("/api/admin/marketing/disconnect", requireAdmin, validateBody(schemas.a
   }
 });
 
+app.post(
+  "/api/admin/marketing/backfill-connections",
+  requireAdmin,
+  validateBody(schemas.adminMarketingBackfillConnections),
+  async (req, res) => {
+    try {
+      if (!supabase) return dbUnavailable(res);
+      const body = req.validatedBody || {};
+      const out = await backfillMarketingConnectionsFromStoreConfig(supabase, {
+        dryRun: body.dryRun === true,
+        clearLegacyTokens: body.clearLegacyTokens !== false,
+      });
+      if (!out.ok) return res.status(400).json({ ok: false, error: out.error || "backfill_failed" });
+      return res.json({ ok: true, backfill: out });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String(e.message || e) });
+    }
+  }
+);
+
 app.get("/api/admin/marketing/oauth/:platform/authorize", requireAdmin, async (req, res) => {
   try {
-    const built = buildMarketingAuthorizeUrl(req.params.platform);
+    const built = await buildMarketingAuthorizeUrl(req.params.platform);
     if (!built.ok) return res.status(400).json({ ok: false, error: built.error || "Unsupported platform" });
     return res.redirect(302, built.url);
   } catch (e) {
@@ -2657,7 +2771,7 @@ app.get("/api/admin/marketing/oauth/:platform/authorize", requireAdmin, async (r
 
 app.get("/api/admin/marketing/oauth/:platform/authorize-url", requireAdmin, async (req, res) => {
   try {
-    const built = buildMarketingAuthorizeUrl(req.params.platform);
+    const built = await buildMarketingAuthorizeUrl(req.params.platform);
     if (!built.ok) return res.status(400).json({ ok: false, error: built.error || "Unsupported platform" });
     return res.json({ ok: true, url: built.url, platform: built.platform });
   } catch (e) {
@@ -2668,7 +2782,7 @@ app.get("/api/admin/marketing/oauth/:platform/authorize-url", requireAdmin, asyn
 // Backward-compatible aliases for older frontend builds.
 app.get("/api/admin/marketing/oauth/:platform/start", requireAdmin, async (req, res) => {
   try {
-    const built = buildMarketingAuthorizeUrl(req.params.platform);
+    const built = await buildMarketingAuthorizeUrl(req.params.platform);
     if (!built.ok) return res.status(400).json({ ok: false, error: built.error || "Unsupported platform" });
     res.setHeader("X-Deprecated-Route", "/api/admin/marketing/oauth/:platform/start");
     res.setHeader("Link", '</api/admin/marketing/oauth/:platform/authorize>; rel="successor-version"');
@@ -2680,7 +2794,7 @@ app.get("/api/admin/marketing/oauth/:platform/start", requireAdmin, async (req, 
 
 app.get("/api/admin/marketing/oauth/:platform/url", requireAdmin, async (req, res) => {
   try {
-    const built = buildMarketingAuthorizeUrl(req.params.platform);
+    const built = await buildMarketingAuthorizeUrl(req.params.platform);
     if (!built.ok) return res.status(400).json({ ok: false, error: built.error || "Unsupported platform" });
     res.setHeader("X-Deprecated-Route", "/api/admin/marketing/oauth/:platform/url");
     res.setHeader("Link", '</api/admin/marketing/oauth/:platform/authorize-url>; rel="successor-version"');
@@ -2705,7 +2819,7 @@ app.get("/api/admin/marketing/oauth/:platform/callback", async (req, res) => {
     if (oauthErr) {
       return res.redirect(302, "/admin/marketing?oauth=error&reason=" + encodeURIComponent(oauthErr));
     }
-    const stored = consumeOauthState(state);
+    const stored = await consumeOauthState(supabase, state);
     if (!stored || String(stored.platform || "") !== platform) {
       return res.redirect(302, "/admin/marketing?oauth=error&reason=invalid_state");
     }
@@ -2722,6 +2836,7 @@ app.get("/api/admin/marketing/oauth/:platform/callback", async (req, res) => {
         pageId: tokenOut.pageId || "",
         igUserId: tokenOut.igUserId || "",
         authMethod: "oauth",
+        expiresAt: tokenOut.expiresIn ? new Date(Date.now() + Number(tokenOut.expiresIn) * 1000).toISOString() : null,
       });
       if (!c.ok) {
         return res.redirect(302, "/admin/marketing?oauth=error&reason=" + encodeURIComponent(c.error || "connect_failed"));
@@ -2737,15 +2852,12 @@ app.get("/api/admin/marketing/oauth/:platform/callback", async (req, res) => {
       const c = await connectPlatform(supabase, platform, tokenOut.token, {
         accountId: tokenOut.accountId || "",
         authMethod: "oauth",
+        refreshToken: tokenOut.refreshToken || "",
+        expiresAt: tokenOut.expiresIn ? new Date(Date.now() + Number(tokenOut.expiresIn) * 1000).toISOString() : null,
       });
       if (!c.ok) {
         return res.redirect(302, "/admin/marketing?oauth=error&reason=" + encodeURIComponent(c.error || "connect_failed"));
       }
-      await updateMarketingOauthMeta(supabase, {
-        tiktok_refresh_token: tokenOut.refreshToken || "",
-        tiktok_expires_in: tokenOut.expiresIn || null,
-        updated_at: new Date().toISOString(),
-      });
       return res.redirect(302, "/admin/marketing?oauth=ok&platform=tiktok");
     }
 
@@ -3107,26 +3219,53 @@ app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
         "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, image_urls, supplier_variants, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, color_variants, style_key, description, selling_points, seo_last_checked_at";
       const catSelectLegacy =
         "id, name, category, price, status, sourcing_status, source_platform, source_name, source_url, source_product_id, external_id, image_url, image_urls, supplier_variants, available, availability_reason, supplier_last_checked_at, supplier_sync_error, supplier_name, supplier_country, import_method, ai_fit_score, brand_fit_reason, updated_at, color, color_variants, style_key, description, selling_points";
-      let catQ = await supabase
+      let catQActive = await supabase
         .from("products")
         .select(catSelectFull)
+        .neq("status", "removed")
         .order("updated_at", { ascending: false })
         .limit(200);
-      if (catQ.error) {
-        catQ = await supabase
+      let catQRemoved = await supabase
+        .from("products")
+        .select(catSelectFull)
+        .eq("status", "removed")
+        .order("updated_at", { ascending: false })
+        .limit(120);
+      if (catQActive.error) {
+        catQActive = await supabase
           .from("products")
           .select(catSelectLite)
+          .neq("status", "removed")
           .order("updated_at", { ascending: false })
           .limit(200);
       }
-      if (catQ.error) {
-        catQ = await supabase
+      if (catQRemoved.error) {
+        catQRemoved = await supabase
+          .from("products")
+          .select(catSelectLite)
+          .eq("status", "removed")
+          .order("updated_at", { ascending: false })
+          .limit(120);
+      }
+      if (catQActive.error) {
+        catQActive = await supabase
           .from("products")
           .select(catSelectLegacy)
+          .neq("status", "removed")
           .order("updated_at", { ascending: false })
           .limit(200);
       }
-      if (!catQ.error) catalogRows = catQ.data || [];
+      if (catQRemoved.error) {
+        catQRemoved = await supabase
+          .from("products")
+          .select(catSelectLegacy)
+          .eq("status", "removed")
+          .order("updated_at", { ascending: false })
+          .limit(120);
+      }
+      const activeRows = catQActive.error ? [] : catQActive.data || [];
+      const removedRows = catQRemoved.error ? [] : catQRemoved.data || [];
+      catalogRows = activeRows.concat(removedRows);
       storeMetrics = computeStoreMetrics(storeRows || []);
       trends7d = await getLastNDaysTrends(supabase, 7);
       learningMetrics = await getLearningMetricsSummary(supabase);
